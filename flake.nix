@@ -58,6 +58,12 @@
             inherit cargoArtifacts;
             cargoClippyExtraArgs = "--all-targets -- -D warnings";
           });
+          # Docs must build clean (missing_docs is warn-level in lib.rs;
+          # -D warnings promotes it + broken intra-doc links to errors).
+          doc = craneLib.cargoDoc (commonArgs // {
+            inherit cargoArtifacts;
+            RUSTDOCFLAGS = "-D warnings";
+          });
         };
 
         devShells.default = pkgs.mkShell {

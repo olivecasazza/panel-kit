@@ -5,6 +5,14 @@ edition = "2021"
 license = "MIT"
 description = "Generic Dioxus panel-workspace library: floating/tiling panels, traffic lights, drag/resize, tiling drag-reorder, minimize-to-dock, layout persistence"
 repository = "https://github.com/ocasazza/panel-kit"
+readme = "README.md"
+keywords = ["dioxus", "ui", "panels", "workspace", "wasm"]
+categories = ["gui", "wasm", "web-programming"]
+
+# The crate is wasm-only (Dioxus web): document it for the target it builds for.
+[package.metadata.docs.rs]
+targets = ["wasm32-unknown-unknown"]
+default-target = "wasm32-unknown-unknown"
 
 [dependencies]
 dioxus = { version = "0.6", features = ["web"] }

@@ -43,6 +43,18 @@ rsx! {
 Inject `panel_kit::CSS` once at the app root, then layer app-specific styles
 after it; override the `:root` variables to retheme.
 
+## Documentation
+
+API docs are rustdoc-first — the crate root has a quick start, theming
+notes, and a guide to the examples:
+
+```sh
+cargo doc --no-deps --open
+```
+
+(Once published to crates.io, the same docs will be on docs.rs, built for
+`wasm32-unknown-unknown`.)
+
 ## Examples
 
 One browser demo per component, each exercising every public parameter.
