@@ -696,6 +696,31 @@ impl<K: PanelKind> Workspace<K> {
         }
     }
 
+    /// Restore and raise the panel of `kind`: un-minimizes it (the
+    /// programmatic twin of a dock-chip click) and brings it to the front.
+    /// No-op when the layout holds no panel of that kind. Hook for command
+    /// palettes / keyboard shortcuts — the built-in chrome never calls it.
+    ///
+    /// ```no_run
+    /// # use panel_kit::{PanelKind, Workspace};
+    /// # fn jump<K: PanelKind>(ws: Workspace<K>, kind: K) {
+    /// ws.restore(kind);
+    /// # }
+    /// ```
+    pub fn restore(&self, kind: K) {
+        let mut panels = self.panels;
+        let z = front_z(&panels.read());
+        let idx = panels.read().iter().position(|p| p.kind == kind);
+        if let Some(i) = idx {
+            if let Some(p) = panels.write().get_mut(i) {
+                if p.state == WinState::Minimized {
+                    p.state = WinState::Floating;
+                }
+                p.z = z;
+            }
+        }
+    }
+
     /// The footer dock: minimized panels collapse to chips; click restores
     /// (and raises) the panel. Render it once after
     /// [`render`](Workspace::render) in the app root.
