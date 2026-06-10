@@ -43,6 +43,30 @@ rsx! {
 Inject `panel_kit::CSS` once at the app root, then layer app-specific styles
 after it; override the `:root` variables to retheme.
 
+## Examples
+
+One browser demo per component, each exercising every public parameter.
+From `nix develop` (which provides a matching dioxus-cli 0.6.x, lld, and
+wasm-bindgen-cli):
+
+```sh
+dx serve --example workspace --platform web
+```
+
+| example | shows |
+| --- | --- |
+| `workspace` | the whole workspace system: `use_workspace` + `PanelKind` + `LayoutBuilder`, floating mode (drag/resize/z-raise/traffic lights), tiling mode (red-light toggle, drag-header reorder, full-width panel via the `panel-<slug>` class), a panel that starts minimized in the dock, viewport clamping vs. stored geometry, localStorage persistence (`panel_kit_example_workspace`), the mobile stack, the `is_editing` shortcut gate, and a `tip_pos` tooltip overlay |
+| `badge` | all ten `BadgeKind`s, every prop (`active`, `with_x`, `with_plus`, `small`, `override_color`, `accent_color`, both `BadgeClickKind`s, `emit_hover`) behind live toggles, an event log proving every `BadgeAction` variant fires, and a `tag_hue` FNV hue-spread row |
+| `spinner` | `Spinner` with and without `label`, plus a live-editable label |
+| `theming` | the documented retheme path: `:root` variable overrides layered after `panel_kit::CSS`, with three switchable presets |
+
+`dx build --example <name> --platform web` produces the same app
+statically under `target/dx/<name>/debug/web/public`.
+
+Note: `Cargo.lock` pins `wasm-bindgen` to the exact version of nixpkgs'
+`wasm-bindgen-cli` (dx refuses to bindgen with a mismatched CLI); keep the
+two in lockstep when bumping the flake.
+
 ## Developing against a local checkout
 
 In the consuming app's workspace `Cargo.toml`:

@@ -3,6 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # nixos-25.05 is the last channel shipping dioxus-cli 0.6.x, which must
+    # match the dioxus 0.6 the library (and its examples) build against.
+    nixpkgs-dioxus.url = "github:NixOS/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
     rust-overlay = {
@@ -11,13 +14,14 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay }:
+  outputs = { self, nixpkgs, nixpkgs-dioxus, flake-utils, crane, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         };
+        pkgsDioxus = import nixpkgs-dioxus { inherit system; };
         # The library only ever compiles to wasm32 (Dioxus web) — check it
         # for the target its consumers (jump-cannon, apple-notes-ocr-flow)
         # actually build.
@@ -32,6 +36,7 @@
             ./Cargo.lock
             ./src
             ./assets # panel-kit.css is include_str!'d into the lib
+            ./examples # one browser demo per component, clippy'd by checks
           ];
         };
         commonArgs = {
@@ -56,7 +61,16 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = [ rustWasm ];
+          packages = [
+            rustWasm
+            # `dx serve --example <name> --platform web` runs the demos.
+            # dx 0.6 shells out to lld for debug wasm links and expects a
+            # wasm-bindgen-cli on PATH matching Cargo.lock's wasm-bindgen
+            # (0.2.121 — kept in lockstep with nixpkgs' wasm-bindgen-cli).
+            pkgsDioxus.dioxus-cli
+            pkgs.wasm-bindgen-cli
+            pkgs.lld
+          ];
         };
       });
 }
