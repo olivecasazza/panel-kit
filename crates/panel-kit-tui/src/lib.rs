@@ -49,7 +49,7 @@ use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 /// Height of one tiling row unit in cells (`tile_h` counts these).
@@ -229,15 +229,15 @@ impl<K: PanelKind> TuiWorkspace<K> {
             let border_style = if self.tile_drag == Some(p.kind) {
                 Style::default().fg(t.yellow)
             } else if focused {
-                Style::default().fg(t.line2)
+                Style::default().fg(t.dim)
             } else {
-                Style::default().fg(t.line)
+                Style::default().fg(t.line2)
             };
             // Traffic lights sit top-LEFT like the web shell, in its
             // printer-CMY colors: blue mode, yellow minimize, pink
-            // maximize. They render as ● dots and reveal their action
-            // glyph under the pointer — the hover-glyph behavior of the
-            // web lights.
+            // maximize. They stay circles: the hovered light swells to ◉
+            // and its action is named in a dim hint at the right edge of
+            // the header (no glyph swap — the circles are the identity).
             let ly = rect.y;
             let lx = rect.x + 2;
             let light_cells = [
@@ -245,25 +245,22 @@ impl<K: PanelKind> TuiWorkspace<K> {
                 Rect::new(lx + 2, ly, 1, 1),
                 Rect::new(lx + 4, ly, 1, 1),
             ];
-            let hovering_lights = self
-                .hover
-                .map(|h| h.y == ly && h.x >= lx && h.x <= lx + 4)
-                .unwrap_or(false);
-            let mode_glyph = if self.mode == Mode::Tiling { "❐" } else { "⊞" };
-            let max_glyph = if p.state == WinState::Maximized { "⤡" } else { "⤢" };
-            let light = |glyph: &'static str, color| {
+            let hovered_light = self.hover.and_then(|h| {
+                light_cells.iter().position(|c| c.contains(h))
+            });
+            let light = |slot: usize, color| {
                 Span::styled(
-                    if hovering_lights { glyph } else { "●" },
+                    if hovered_light == Some(slot) { "◉" } else { "●" },
                     Style::default().fg(color),
                 )
             };
             let title_line = Line::from(vec![
                 Span::raw(" "),
-                light(mode_glyph, t.blue),
+                light(0, t.blue),
                 Span::raw(" "),
-                light("−", t.yellow),
+                light(1, t.yellow),
                 Span::raw(" "),
-                light(max_glyph, t.pink),
+                light(2, t.pink),
                 Span::raw("  "),
                 Span::styled(
                     p.kind.title().to_string(),
@@ -271,19 +268,41 @@ impl<K: PanelKind> TuiWorkspace<K> {
                 ),
                 Span::raw(" "),
             ]);
-            let block = Block::default()
+            let mut block = Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(border_style)
                 .title(title_line);
+            if let Some(slot) = hovered_light {
+                let hint = match slot {
+                    0 => {
+                        if self.mode == Mode::Tiling { "float" } else { "tile" }
+                    }
+                    1 => "minimize",
+                    _ => {
+                        if p.state == WinState::Maximized { "restore" } else { "maximize" }
+                    }
+                };
+                block = block.title(
+                    Line::from(Span::styled(
+                        format!(" {hint} "),
+                        Style::default().fg(t.dim),
+                    ))
+                    .right_aligned(),
+                );
+            }
             let inner = block.inner(rect);
             f.render_widget(block, rect);
             body(f, inner, p.kind, maximized == Some(i));
-            // Resize grip: bottom-right corner of the border.
+            // Resize grip: the rounded bottom-right corner itself — no
+            // extra glyph; it tints accent under the pointer.
             let grip = Rect::new(rect.right().saturating_sub(2), rect.bottom().saturating_sub(1), 2, 1);
-            f.render_widget(
-                Paragraph::new("◢").style(Style::default().fg(t.dim)),
-                Rect::new(grip.x + 1, grip.y, 1, 1),
-            );
+            if self.hover.map(|h| grip.contains(h)).unwrap_or(false) {
+                f.render_widget(
+                    Paragraph::new("╯").style(Style::default().fg(t.accent)),
+                    Rect::new(rect.right().saturating_sub(1), grip.y, 1, 1),
+                );
+            }
 
             self.zones.push(Zone {
                 idx: i,
