@@ -34,6 +34,7 @@
 
 pub mod badge;
 pub mod charts;
+pub mod scroll;
 pub mod spinner;
 pub mod theme;
 
