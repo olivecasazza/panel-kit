@@ -14,6 +14,24 @@ apple-notes-ocr-flow, which both consume it as a git dependency:
 panel-kit = { git = "https://github.com/ocasazza/panel-kit" }
 ```
 
+## Crates
+
+The repo is a small workspace — one state machine, two renderers:
+
+- **`panel-kit-core`** (`crates/panel-kit-core`) — the renderer-agnostic
+  state machine: `PanelWin`, `WinState`, `Mode`, the drag/resize/reorder
+  math, viewport clamping, and the persisted `SavedLayout` shape. Pure data
+  and math; units are abstract (px on the web, cells in a terminal).
+- **`panel-kit`** (repo root) — the Dioxus web shell: signals, DOM events,
+  CSS chrome, localStorage persistence. Public API unchanged from before
+  the split; existing consumers don't need any changes.
+- **`panel-kit-tui`** (`crates/panel-kit-tui`) — the ratatui shell: the same
+  workspace drawn in terminal cells with crossterm mouse drag/resize,
+  traffic-light glyphs, a dock line, and JSON-file persistence. Try it:
+  `cargo run -p panel-kit-tui --example workspace`. Via
+  [ratzilla](https://github.com/orhun/ratzilla) this renderer can also
+  target the browser DOM — one panel codebase, web and terminal skins.
+
 ## Usage
 
 The app supplies two things: a `PanelKind` impl (an enum of its panels) and a

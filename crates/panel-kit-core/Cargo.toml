@@ -1,0 +1,12 @@
+[package]
+name = "panel-kit-core"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Renderer-agnostic panel-workspace state machine: geometry, z-order, drag/resize math, tiling reorder, layout persistence model"
+repository = "https://github.com/ocasazza/panel-kit"
+keywords = ["ui", "panels", "workspace", "layout"]
+categories = ["gui"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

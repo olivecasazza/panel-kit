@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/panel-kit-core", "crates/panel-kit-tui"]
+
 [package]
 name = "panel-kit"
 version = "0.2.0"
@@ -10,11 +13,14 @@ keywords = ["dioxus", "ui", "panels", "workspace", "wasm"]
 categories = ["gui", "wasm", "web-programming"]
 
 # The crate is wasm-only (Dioxus web): document it for the target it builds for.
+# The renderer-agnostic state machine lives in crates/panel-kit-core; the
+# terminal renderer in crates/panel-kit-tui.
 [package.metadata.docs.rs]
 targets = ["wasm32-unknown-unknown"]
 default-target = "wasm32-unknown-unknown"
 
 [dependencies]
+panel-kit-core = { version = "0.2.0", path = "crates/panel-kit-core" }
 dioxus = { version = "0.6", features = ["web"] }
 serde = { version = "1", features = ["derive"] }
 gloo-storage = "0.3"

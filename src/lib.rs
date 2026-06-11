@@ -87,7 +87,15 @@ pub mod badge;
 use dioxus::events::MouseEvent;
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
-use serde::{Deserialize, Serialize};
+
+pub use panel_kit_core::{
+    Drag, DragKind, LayoutBuilder, Mode, PanelKind, PanelWin, WinState, TILE_ROW_PX,
+};
+use panel_kit_core::{
+    apply_drag, begin_drag as core_begin_drag, begin_tile_resize as core_begin_tile_resize,
+    effective_rect as core_effective_rect, front_z, kind_slug, merge_defaults,
+    reorder_tile as core_reorder_tile, Clamp, SavedLayout, TileMetrics, TILE_W_MAX,
+};
 
 /// Base stylesheet for the workspace chrome (panels, lights, dock, badges,
 /// spinner, tooltip overlay, mobile breakpoint). Inject once at the app root
@@ -96,224 +104,10 @@ use serde::{Deserialize, Serialize};
 /// [crate-level theming notes](crate#theming)).
 pub const CSS: &str = include_str!("../assets/panel-kit.css");
 
-/// The app's panel identifier — typically a fieldless enum.
-///
-/// This is the only trait an app must implement to use the workspace: one
-/// variant per panel, plus a [`title`](PanelKind::title). The serde bounds
-/// exist because the layout (including each panel's kind) persists to
-/// localStorage; the `Copy + Eq + Hash` bounds let the workspace use kinds
-/// as cheap, stable panel identities across reorders and reloads.
-///
-/// # Examples
-///
-/// ```no_run
-/// use serde::{Deserialize, Serialize};
-///
-/// #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-/// enum Panel { Graph, Inspector }
-///
-/// impl panel_kit::PanelKind for Panel {
-///     fn title(self) -> &'static str {
-///         match self {
-///             Panel::Graph => "Graph",
-///             Panel::Inspector => "Inspector",
-///         }
-///     }
-/// }
-/// ```
-pub trait PanelKind:
-    Copy + PartialEq + Eq + std::hash::Hash + Serialize + serde::de::DeserializeOwned + 'static
-{
-    /// Human-readable panel title, shown in the panel header and its dock
-    /// chip. Also slugified into the panel's `panel-<slug>` CSS class
-    /// (`"Filter Strip"` → `panel-filter-strip`), so it should be stable.
-    fn title(self) -> &'static str;
-}
-
-/// CSS-safe slug of a panel title ("Filter Strip" -> "filter-strip"). Every
-/// panel section gets `panel panel-<slug>` so apps can style individual
-/// panels — e.g. making one panel full-width in tiling mode.
-fn kind_slug(title: &str) -> String {
-    title
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
-        .collect()
-}
-
-/// Per-panel window state, cycled by the traffic lights.
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum WinState {
-    /// Normal: shown at its stored geometry (floating mode) or in its grid
-    /// slot (tiling mode).
-    Floating,
-    /// Collapsed into a chip on the [dock](Workspace::dock); clicking the
-    /// chip restores the panel.
-    Minimized,
-    /// Fills the whole workspace area, hiding every other panel. The pink
-    /// light restores it.
-    Maximized,
-}
-
-/// Tiling-mode row height unit in px — [`PanelWin::tile_h`] counts these.
-pub const TILE_ROW_PX: f64 = 150.0;
-/// Width span ceiling (quarter-row units).
-const TILE_W_MAX: u8 = 4;
-/// Height span ceiling ([`TILE_ROW_PX`] rows).
-const TILE_H_MAX: u8 = 6;
-
-fn default_tile_w() -> u8 {
-    1
-}
-fn default_tile_h() -> u8 {
-    2
-}
-
-/// One panel's geometry + window state. `z` is the floating-mode stacking order.
-///
-/// Stored geometry is the user's *intent*: when the browser window shrinks,
-/// panels are clamped on screen at render time but the stored rect is left
-/// untouched, so they spring back when the window grows. Build defaults with
-/// [`LayoutBuilder`].
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct PanelWin<K> {
-    /// Which panel this is (the app's [`PanelKind`]).
-    pub kind: K,
-    /// Left edge in px, relative to the workspace area.
-    pub x: f64,
-    /// Top edge in px, relative to the workspace area.
-    pub y: f64,
-    /// Width in px.
-    pub w: f64,
-    /// Height in px.
-    pub h: f64,
-    /// Window state (normal / minimized to dock / maximized).
-    pub state: WinState,
-    /// Floating-mode stacking order; higher is in front. Mousedown on a
-    /// panel raises it to the front.
-    pub z: i32,
-    /// Tiling-mode width span in quarter-row units (1–4): 1 ≈ a quarter of
-    /// the row, 4 = the full row. The tiling resize grip snaps this;
-    /// floating geometry (`w`/`h`) is untouched. Layouts saved before this
-    /// field existed deserialize to 1.
-    #[serde(default = "default_tile_w")]
-    pub tile_w: u8,
-    /// Tiling-mode height in [`TILE_ROW_PX`] rows (1–6). Defaults to 2
-    /// (300 px — the pre-resize fixed tile height).
-    #[serde(default = "default_tile_h")]
-    pub tile_h: u8,
-}
-
-impl<K> PanelWin<K> {
-    /// Builder-style override of the tiling spans, clamped to their valid
-    /// ranges (width 1–4 quarter-row units, height 1–6 rows). Chain it off
-    /// [`LayoutBuilder::at`] for panels that should start bigger in tiling
-    /// mode — e.g. a full-width main view: `b.at(...).with_tile(4, 3)`.
-    pub fn with_tile(mut self, w: u8, h: u8) -> Self {
-        self.tile_w = w.clamp(1, TILE_W_MAX);
-        self.tile_h = h.clamp(1, TILE_H_MAX);
-        self
-    }
-}
-
-/// Workspace layout mode, toggled by the blue traffic light.
-///
-/// A narrow viewport forces tiling regardless of this setting — see
-/// [`Workspace::effective_mode`].
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Mode {
-    /// Free placement: panels are absolutely positioned, draggable,
-    /// resizable, and overlap by z-order.
-    Floating,
-    /// Auto grid: panels flow into a CSS grid in `Vec` order; dragging a
-    /// panel header over another panel reorders them.
-    Tiling,
-}
-
-/// What an in-flight floating-mode drag is doing.
-#[derive(Clone, Copy, PartialEq)]
-pub enum DragKind {
-    /// Dragging the panel header: the panel follows the pointer.
-    Move,
-    /// Dragging the bottom-right resize handle: the panel grows/shrinks.
-    Resize,
-}
-
-/// An in-flight floating-mode drag: which panel, what kind, and the mouse +
-/// panel geometry captured at mousedown (deltas are applied against these).
-///
-/// Created by [`Workspace::begin_drag`], applied by
-/// [`Workspace::handle_mouse_move`], cleared by
-/// [`Workspace::handle_mouse_up`].
-#[derive(Clone, Copy, PartialEq)]
-pub struct Drag {
-    /// Index of the dragged panel in [`Workspace::panels`].
-    pub idx: usize,
-    /// Move or resize.
-    pub kind: DragKind,
-    /// Mouse x at mousedown (client coordinates).
-    pub start_mx: f64,
-    /// Mouse y at mousedown (client coordinates).
-    pub start_my: f64,
-    /// Panel x at mousedown.
-    pub start_x: f64,
-    /// Panel y at mousedown.
-    pub start_y: f64,
-    /// Panel width at mousedown.
-    pub start_w: f64,
-    /// Panel height at mousedown.
-    pub start_h: f64,
-}
-
-/// Convenience builder for default layouts: hands out incrementing z values.
-///
-/// # Examples
-///
-/// ```no_run
-/// # use serde::{Deserialize, Serialize};
-/// # #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-/// # enum Panel { Graph, Inspector }
-/// use panel_kit::{LayoutBuilder, PanelWin};
-///
-/// fn default_layout() -> Vec<PanelWin<Panel>> {
-///     let mut b = LayoutBuilder::new();
-///     vec![
-///         b.at(Panel::Graph, 16.0, 16.0, 520.0, 360.0),
-///         b.at(Panel::Inspector, 560.0, 16.0, 320.0, 360.0),
-///     ]
-/// }
-/// ```
-pub struct LayoutBuilder {
-    z: i32,
-}
-
-impl LayoutBuilder {
-    /// Start a builder; the first panel gets `z = 1`.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self { z: 0 }
-    }
-
-    /// A [`PanelWin`] at the given rect, in [`WinState::Floating`], with the
-    /// next z value — so later panels stack in front of earlier ones.
-    pub fn at<K>(&mut self, kind: K, x: f64, y: f64, w: f64, h: f64) -> PanelWin<K> {
-        self.z += 1;
-        PanelWin {
-            kind,
-            x,
-            y,
-            w,
-            h,
-            state: WinState::Floating,
-            z: self.z,
-            tile_w: default_tile_w(),
-            tile_h: default_tile_h(),
-        }
-    }
-}
-
-fn front_z<K>(ps: &[PanelWin<K>]) -> i32 {
-    ps.iter().map(|p| p.z).max().unwrap_or(0) + 1
-}
+// The core types (PanelKind, PanelWin, WinState, Mode, Drag, LayoutBuilder)
+// and all geometry/drag math live in panel-kit-core and are re-exported
+// above — this crate is the Dioxus shell: signals, DOM events, CSS,
+// localStorage persistence, and rendering.
 
 fn viewport_size() -> (f64, f64) {
     let win = web_sys::window();
@@ -322,21 +116,9 @@ fn viewport_size() -> (f64, f64) {
     (vw, vh)
 }
 
-/// The on-screen geometry for a floating panel: shrunk if larger than the
-/// viewport, pulled back so the whole panel stays visible.
-///
-/// This is a render-time projection — the stored `PanelWin` keeps the
-/// user's intended geometry untouched. Mutating state here instead (the
-/// original behavior) made clamping one-way: shrink the window once and
-/// every panel stayed crushed after the window grew back.
+/// Render-time viewport clamp — core math with the web px metrics.
 fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64) -> (f64, f64, f64, f64) {
-    let ws_w = (vw - 4.0).max(220.0);
-    let ws_h = (vh - 66.0).max(180.0); // minus topbar (~36) + dock (~30)
-    let w = p.w.min(ws_w - 12.0).max(180.0);
-    let h = p.h.min(ws_h - 12.0).max(110.0);
-    let x = p.x.min(ws_w - w - 6.0).max(0.0);
-    let y = p.y.min(ws_h - h - 6.0).max(0.0);
-    (x, y, w, h)
+    core_effective_rect(p, vw, vh, &Clamp::WEB)
 }
 
 /// Narrow viewport (< 760 px wide) → mobile shell (static stacked tiling
@@ -366,12 +148,6 @@ pub fn is_editing() -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Serialize, Deserialize)]
-struct SavedLayout<K> {
-    panels: Vec<PanelWin<K>>,
-    tiling: bool,
-}
-
 fn save_layout<K: PanelKind>(key: &str, panels: &[PanelWin<K>], mode: Mode) {
     let _ = LocalStorage::set(key, SavedLayout { panels: panels.to_vec(), tiling: mode == Mode::Tiling });
 }
@@ -382,11 +158,7 @@ fn save_layout<K: PanelKind>(key: &str, panels: &[PanelWin<K>], mode: Mode) {
 fn load_layout<K: PanelKind>(key: &str, defaults: &[PanelWin<K>]) -> Option<(Vec<PanelWin<K>>, Mode)> {
     let saved: SavedLayout<K> = LocalStorage::get(key).ok()?;
     let mut panels = saved.panels;
-    for d in defaults {
-        if !panels.iter().any(|p| p.kind == d.kind) {
-            panels.push(*d);
-        }
-    }
+    merge_defaults(&mut panels, defaults);
     Some((panels, if saved.tiling { Mode::Tiling } else { Mode::Floating }))
 }
 
@@ -525,24 +297,11 @@ impl<K: PanelKind> Workspace<K> {
         // anchored to what's visible — no jump on the first mousemove.
         let (vw, vh) = *self.viewport.read();
         let mut panels = self.panels;
-        let p = {
-            let mut ps = panels.write();
-            let Some(p) = ps.get_mut(idx) else { return };
-            let (x, y, w, h) = effective_rect(p, vw, vh);
-            (p.x, p.y, p.w, p.h) = (x, y, w, h);
-            *p
-        };
-        let mut drag = self.drag;
-        drag.set(Some(Drag {
-            idx,
-            kind,
-            start_mx: c.x,
-            start_my: c.y,
-            start_x: p.x,
-            start_y: p.y,
-            start_w: p.w,
-            start_h: p.h,
-        }));
+        let d = core_begin_drag(&mut *panels.write(), idx, kind, c.x, c.y, vw, vh, &Clamp::WEB);
+        if d.is_some() {
+            let mut drag = self.drag;
+            drag.set(d);
+        }
     }
 
     /// Start a tiling-mode resize drag from the corner grip. Unlike
@@ -554,22 +313,11 @@ impl<K: PanelKind> Workspace<K> {
     /// on the effective mode.
     pub fn begin_tile_resize(&self, idx: usize, e: &MouseEvent) {
         let c = e.client_coordinates();
-        let (tw, th) = {
-            let ps = self.panels.read();
-            let Some(p) = ps.get(idx) else { return };
-            (p.tile_w as f64, p.tile_h as f64)
-        };
-        let mut drag = self.drag;
-        drag.set(Some(Drag {
-            idx,
-            kind: DragKind::Resize,
-            start_mx: c.x,
-            start_my: c.y,
-            start_x: 0.0,
-            start_y: 0.0,
-            start_w: tw,
-            start_h: th,
-        }));
+        let d = core_begin_tile_resize(&*self.panels.read(), idx, c.x, c.y);
+        if d.is_some() {
+            let mut drag = self.drag;
+            drag.set(d);
+        }
     }
 
     /// Attach to the app root's `onmousemove` — applies the in-flight
@@ -578,32 +326,19 @@ impl<K: PanelKind> Workspace<K> {
     pub fn handle_mouse_move(&self, e: &MouseEvent) {
         if let Some(d) = *self.drag.read() {
             let c = e.client_coordinates();
+            let tiling = self.effective_mode() == Mode::Tiling;
+            let (vw, _) = *self.viewport.read();
             let mut panels = self.panels;
-            let mut ps = panels.write();
-            if let Some(p) = ps.get_mut(d.idx) {
-                match d.kind {
-                    DragKind::Move => {
-                        p.x = (d.start_x + (c.x - d.start_mx)).max(0.0);
-                        p.y = (d.start_y + (c.y - d.start_my)).max(0.0);
-                    }
-                    // Tiling resize snaps to fit sizes: pointer deltas count
-                    // in quarter-row width steps and TILE_ROW_PX height rows
-                    // against the spans captured at mousedown (start_w/h
-                    // hold spans, not px — see begin_tile_resize).
-                    DragKind::Resize if self.effective_mode() == Mode::Tiling => {
-                        let (vw, _) = *self.viewport.read();
-                        let col = ((vw - 16.0) / TILE_W_MAX as f64).max(80.0);
-                        let dw = ((c.x - d.start_mx) / col).round();
-                        let dh = ((c.y - d.start_my) / TILE_ROW_PX).round();
-                        p.tile_w = (d.start_w + dw).clamp(1.0, TILE_W_MAX as f64) as u8;
-                        p.tile_h = (d.start_h + dh).clamp(1.0, TILE_H_MAX as f64) as u8;
-                    }
-                    DragKind::Resize => {
-                        p.w = (d.start_w + (c.x - d.start_mx)).max(180.0);
-                        p.h = (d.start_h + (c.y - d.start_my)).max(110.0);
-                    }
-                }
-            }
+            apply_drag(
+                &mut *panels.write(),
+                &d,
+                c.x,
+                c.y,
+                tiling,
+                vw,
+                &Clamp::WEB,
+                &TileMetrics::WEB,
+            );
         }
     }
 
@@ -624,16 +359,7 @@ impl<K: PanelKind> Workspace<K> {
     /// persists with the layout.
     fn reorder_tile(&self, dragged: K, target: K) {
         let mut panels = self.panels;
-        let mut ps = panels.write();
-        let Some(from) = ps.iter().position(|p| p.kind == dragged) else { return };
-        let Some(to) = ps.iter().position(|p| p.kind == target) else { return };
-        if from == to {
-            return;
-        }
-        let p = ps.remove(from);
-        let after_removal = if from < to { to - 1 } else { to };
-        let insert_at = (if from < to { after_removal + 1 } else { after_removal }).min(ps.len());
-        ps.insert(insert_at, p);
+        core_reorder_tile(&mut *panels.write(), dragged, target);
     }
 
     /// Render the workspace area. `body` renders one panel's content given
@@ -828,16 +554,7 @@ impl<K: PanelKind> Workspace<K> {
     /// ```
     pub fn restore(&self, kind: K) {
         let mut panels = self.panels;
-        let z = front_z(&panels.read());
-        let idx = panels.read().iter().position(|p| p.kind == kind);
-        if let Some(i) = idx {
-            if let Some(p) = panels.write().get_mut(i) {
-                if p.state == WinState::Minimized {
-                    p.state = WinState::Floating;
-                }
-                p.z = z;
-            }
-        }
+        panel_kit_core::restore(&mut *panels.write(), kind);
     }
 
     /// The footer dock: minimized panels collapse to chips; click restores
