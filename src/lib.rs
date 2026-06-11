@@ -64,7 +64,7 @@
 //! layer app-specific styles after it. All chrome colours and the monospace
 //! font come from `:root` CSS variables (`--bg`, `--panel`, `--fg`, `--dim`,
 //! `--line`, `--line2`, `--inv-bg`, `--inv-fg`, `--accent`, `--red`,
-//! `--yellow`, `--green`, `--blue`, `--mono`) — override them in a later stylesheet to
+//! `--yellow`, `--green`, `--blue`, `--pink`, `--mono`) — override them in a later stylesheet to
 //! retheme everything: panels, traffic lights, dock, badges, and spinner.
 //!
 //! # Examples
@@ -149,7 +149,7 @@ pub enum WinState {
     /// Collapsed into a chip on the [dock](Workspace::dock); clicking the
     /// chip restores the panel.
     Minimized,
-    /// Fills the whole workspace area, hiding every other panel. The green
+    /// Fills the whole workspace area, hiding every other panel. The pink
     /// light restores it.
     Maximized,
 }
@@ -753,19 +753,22 @@ impl<K: PanelKind> Workspace<K> {
         }
     }
 
-    /// Panel chrome: traffic lights (blue = floating⇄tiling, yellow =
-    /// minimize, green = maximize⇄restore; each reveals its action glyph on
-    /// hover, macOS-style) + the drag-to-move title strip. In floating mode
-    /// the drag moves the window freely; in tiling mode it starts a reorder
-    /// drag (hover another panel to snap into its slot). Mobile gets neither
-    /// (static stack).
+    /// Panel chrome: traffic lights in printer-CMY (blue = floating⇄tiling,
+    /// yellow = minimize, pink = maximize⇄restore; each reveals its action
+    /// glyph on hover, macOS-style — the pink glyph flips between expand and
+    /// restore with the panel's state) + the drag-to-move title strip. In
+    /// floating mode the drag moves the window freely; in tiling mode it
+    /// starts a reorder drag (hover another panel to snap into its slot).
+    /// Mobile gets neither (static stack).
     fn header(&self, idx: usize, kind: K, draggable: bool, tiling: bool) -> Element {
         let ws = *self;
         let title = kind.title();
         let is_max = self.panels.read().get(idx).map(|p| p.state) == Some(WinState::Maximized);
-        // Glyph shows the mode a click switches TO: floating → ⊞ (tile up),
-        // tiling → ❐ (cut the panels loose).
+        // Glyphs show the state a click switches TO: mode light floating → ⊞
+        // (tile up), tiling → ❐ (cut the panels loose); max light normal → ⤢
+        // (expand), maximized → ⤡ (restore).
         let mode_glyph = if *self.mode.read() == Mode::Tiling { "\u{2750}" } else { "\u{229E}" };
+        let max_glyph = if is_max { "\u{2921}" } else { "\u{2922}" };
         rsx! {
             header {
                 class: "panel-head",
@@ -796,7 +799,7 @@ impl<K: PanelKind> Workspace<K> {
                             if let Some(p) = panels.write().get_mut(idx) { p.state = WinState::Minimized; };
                         },
                         span { class: "light-glyph", "\u{2212}" } }
-                    button { class: "light green", title: "maximize / restore",
+                    button { class: "light max", title: "maximize / restore",
                         onmousedown: move |e: MouseEvent| e.stop_propagation(),
                         onclick: move |_| {
                             let mut panels = ws.panels;
@@ -804,7 +807,7 @@ impl<K: PanelKind> Workspace<K> {
                                 p.state = if p.state == WinState::Maximized { WinState::Floating } else { WinState::Maximized };
                             };
                         },
-                        span { class: "light-glyph", "+" } }
+                        span { class: "light-glyph", "{max_glyph}" } }
                 }
                 span { class: "panel-title", "{title}" }
                 if is_max { span { class: "max-hint", "maximized" } }
