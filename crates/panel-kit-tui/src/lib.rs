@@ -34,8 +34,11 @@
 
 pub mod badge;
 pub mod charts;
+pub mod meter;
 pub mod scroll;
 pub mod spinner;
+pub mod status;
+pub mod table;
 pub mod theme;
 
 pub use theme::Theme;
