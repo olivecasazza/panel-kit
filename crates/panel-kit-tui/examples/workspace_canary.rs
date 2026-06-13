@@ -10,6 +10,7 @@ pub enum Panel {
     Badges,
     Activity,
     Capacity,
+    Nodes,
     Notes,
     Theme,
 }
@@ -21,6 +22,7 @@ impl PanelKind for Panel {
             Panel::Badges => "Badges",
             Panel::Activity => "Activity",
             Panel::Capacity => "Capacity",
+            Panel::Nodes => "Nodes",
             Panel::Notes => "Notes",
             Panel::Theme => "Theme",
         }
@@ -30,13 +32,25 @@ impl PanelKind for Panel {
 pub fn defaults() -> Vec<PanelWin<Panel>> {
     let mut b = LayoutBuilder::new();
     vec![
-        b.at(Panel::Workspace, 1.0, 0.0, 48.0, 12.0).with_tile(2, 2),
-        b.at(Panel::Badges, 51.0, 0.0, 58.0, 16.0).with_tile(2, 3),
-        b.at(Panel::Activity, 1.0, 13.0, 58.0, 15.0).with_tile(2, 3),
-        b.at(Panel::Capacity, 61.0, 17.0, 48.0, 10.0)
-            .with_tile(2, 2),
-        b.at(Panel::Notes, 1.0, 29.0, 64.0, 12.0).with_tile(3, 2),
-        b.at(Panel::Theme, 67.0, 28.0, 42.0, 10.0).with_tile(1, 2),
+        b.at(Panel::Workspace, 1.0, 0.0, 62.0, 11.0).with_tile(1, 2),
+        b.at(Panel::Activity, 1.0, 12.0, 62.0, 14.0).with_tile(1, 3),
+        b.at(Panel::Notes, 1.0, 27.0, 62.0, 13.0).with_tile(1, 3),
+        b.at(Panel::Badges, 65.0, 0.0, 63.0, 11.0).with_tile(2, 3),
+        b.at(Panel::Nodes, 65.0, 12.0, 63.0, 9.0).with_tile(2, 2),
+        b.at(Panel::Capacity, 65.0, 22.0, 63.0, 8.0).with_tile(2, 2),
+        b.at(Panel::Theme, 65.0, 31.0, 63.0, 9.0).with_tile(2, 2),
+    ]
+}
+
+/// Demo rows for the [`Panel::Nodes`] table: `(name, healthy, load, detail)`,
+/// where `load` is `0.0..=1.0`. Exercises [`panel_kit_tui::table`],
+/// [`panel_kit_tui::status`], and [`panel_kit_tui::meter`] together.
+pub fn node_rows() -> [(&'static str, bool, f64, &'static str); 4] {
+    [
+        ("pdx-01 *", true, 0.42, "leader"),
+        ("pdx-02", true, 0.18, "ready"),
+        ("pdx-03", true, 0.71, "busy"),
+        ("gfr-01", false, 0.0, "stale"),
     ]
 }
 

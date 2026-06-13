@@ -27,7 +27,9 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use workspace_canary::{capacity_items, defaults, demo_badges, Panel, EVAL_SERIES, FRAME_SERIES};
+use workspace_canary::{
+    capacity_items, defaults, demo_badges, node_rows, Panel, EVAL_SERIES, FRAME_SERIES,
+};
 
 fn to_tui_mouse(m: crossterm::event::MouseEvent) -> Option<TuiMouseEvent> {
     let kind = match m.kind {
@@ -77,6 +79,7 @@ impl Demo {
             KeyCode::Char('4') => ws.restore_panel(Panel::Capacity),
             KeyCode::Char('5') => ws.restore_panel(Panel::Notes),
             KeyCode::Char('6') => ws.restore_panel(Panel::Theme),
+            KeyCode::Char('7') => ws.restore_panel(Panel::Nodes),
             KeyCode::Up => {
                 self.notes_scroll = self.notes_scroll.saturating_sub(1);
             }
@@ -180,6 +183,31 @@ impl Demo {
             Panel::Capacity => {
                 let items = capacity_items();
                 gauges(f, rect, &theme, &items);
+            }
+            Panel::Nodes => {
+                let rows: Vec<ratatui::widgets::Row> = node_rows()
+                    .iter()
+                    .map(|(name, ok, load, detail)| {
+                        let color = if *ok { theme.green } else { theme.red };
+                        ratatui::widgets::Row::new(vec![
+                            ratatui::widgets::Cell::from(panel_kit_tui::status::labeled(color, *name)),
+                            ratatui::widgets::Cell::from(panel_kit_tui::meter::span(*load, 8, color)),
+                            ratatui::widgets::Cell::from(*detail),
+                        ])
+                    })
+                    .collect();
+                panel_kit_tui::table::table(
+                    f,
+                    rect,
+                    &theme,
+                    &["node", "load", ""],
+                    &[
+                        ratatui::layout::Constraint::Length(12),
+                        ratatui::layout::Constraint::Length(10),
+                        ratatui::layout::Constraint::Length(10),
+                    ],
+                    rows,
+                );
             }
             Panel::Notes => {
                 let mut lines = vec![
