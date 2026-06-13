@@ -269,7 +269,7 @@ pub fn use_workspace<K: PanelKind>(
         // native-window resize. The plain window listener stays as a
         // belt-and-suspenders for ordinary browser tabs.
         let obs_cb = Closure::wrap(Box::new({
-            let mut recompute = recompute.clone();
+            let mut recompute = recompute;
             move || recompute()
         }) as Box<dyn FnMut()>);
         if let Some(el) = web_sys::window()
@@ -349,7 +349,7 @@ impl<K: PanelKind> Workspace<K> {
         // anchored to what's visible — no jump on the first mousemove.
         let (vw, vh) = *self.viewport.read();
         let mut panels = self.panels;
-        let d = core_begin_drag(&mut *panels.write(), idx, kind, c.x, c.y, vw, vh, &Clamp::WEB);
+        let d = core_begin_drag(&mut panels.write(), idx, kind, c.x, c.y, vw, vh, &Clamp::WEB);
         if d.is_some() {
             let mut drag = self.drag;
             drag.set(d);
@@ -365,7 +365,7 @@ impl<K: PanelKind> Workspace<K> {
     /// on the effective mode.
     pub fn begin_tile_resize(&self, idx: usize, e: &MouseEvent) {
         let c = e.client_coordinates();
-        let d = core_begin_tile_resize(&*self.panels.read(), idx, c.x, c.y);
+        let d = core_begin_tile_resize(&self.panels.read(), idx, c.x, c.y);
         if d.is_some() {
             let mut drag = self.drag;
             drag.set(d);
@@ -382,7 +382,7 @@ impl<K: PanelKind> Workspace<K> {
             let (vw, _) = *self.viewport.read();
             let mut panels = self.panels;
             apply_drag(
-                &mut *panels.write(),
+                &mut panels.write(),
                 &d,
                 c.x,
                 c.y,
@@ -601,7 +601,7 @@ impl<K: PanelKind> Workspace<K> {
     /// ```
     pub fn restore(&self, kind: K) {
         let mut panels = self.panels;
-        panel_kit_core::restore(&mut *panels.write(), kind);
+        panel_kit_core::restore(&mut panels.write(), kind);
     }
 
     /// The footer dock: minimized panels collapse to chips; click restores

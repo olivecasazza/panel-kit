@@ -1,7 +1,7 @@
 //! Native terminal backend for the shared panel-kit TUI canary.
 //!
 //! The browser/WASM example and this terminal example intentionally render
-//! the same six-panel workspace. Only the backend loop differs.
+//! the same seven-panel workspace. Only the backend loop differs.
 //!
 //! Run: `cargo run -p panel-kit-tui --example workspace`
 //! Mouse: drag headers to move/reorder, drag the corner grip to resize,
@@ -138,7 +138,7 @@ impl Demo {
                         Line::from("The state machine is shared with the Dioxus renderer."),
                         Line::from(""),
                         Line::from("Mouse: drag headers, drag the corner grip, click lights."),
-                        Line::from("Keys: t swaps theme, 1-6 restore panels, arrows scroll notes."),
+                        Line::from("Keys: t swaps theme, 1-7 restore panels, arrows scroll notes."),
                     ])
                     .style(Style::default().fg(theme.dim)),
                     rect,
@@ -224,7 +224,7 @@ impl Demo {
                     "When the browser example builds under Trunk, the same public TUI API is still web-capable.",
                     "Keeping both examples broad catches drift between core, Dioxus, and TUI renderers.",
                     "The example is not a screenshot fixture: it is executable documentation.",
-                    "Use t for theme, 1-6 to restore minimized panels, and arrow keys to scroll this panel.",
+                    "Use t for theme, 1-7 to restore minimized panels, and arrow keys to scroll this panel.",
                 ] {
                     lines.push(Line::from(text));
                 }
