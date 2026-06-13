@@ -358,7 +358,11 @@ impl<K: PanelKind> TuiWorkspace<K> {
                     1 => t.yellow,
                     _ => t.pink,
                 };
-                let ch = if hovered_light == Some(slot) { 'O' } else { 'o' };
+                let ch = if hovered_light == Some(slot) {
+                    'O'
+                } else {
+                    'o'
+                };
                 if cell.x < rect.right() && cell.y < rect.bottom() {
                     f.buffer_mut()[(cell.x, cell.y)]
                         .set_char(ch)
@@ -380,14 +384,7 @@ impl<K: PanelKind> TuiWorkspace<K> {
                 let hint_w = hint.chars().count() as u16;
                 let hint_x = rect.right().saturating_sub(hint_w.saturating_add(1));
                 if hint_x > title_x {
-                    write_header_text(
-                        f,
-                        hint_x,
-                        rect.y,
-                        hint_w,
-                        &hint,
-                        Style::default().fg(t.dim),
-                    );
+                    write_header_text(f, hint_x, rect.y, hint_w, &hint, Style::default().fg(t.dim));
                 }
             }
             body(f, inner, p.kind, maximized == Some(i));

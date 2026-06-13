@@ -132,10 +132,7 @@ pub fn gauges(f: &mut Frame, area: Rect, t: &Theme, items: &[GaugeItem]) {
         f.render_widget(
             Gauge::default()
                 .ratio(ratio)
-                .label(Span::styled(
-                    item.text.clone(),
-                    Style::default().fg(t.fg),
-                ))
+                .label(Span::styled(item.text.clone(), Style::default().fg(t.fg)))
                 .gauge_style(Style::default().fg(fill).bg(t.line))
                 .use_unicode(true),
             bar,

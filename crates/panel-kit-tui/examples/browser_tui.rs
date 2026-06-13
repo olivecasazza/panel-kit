@@ -23,13 +23,16 @@ fn main() {
 }
 
 #[cfg(target_arch = "wasm32")]
+mod workspace_canary;
+
+#[cfg(target_arch = "wasm32")]
 mod browser {
     use std::{cell::RefCell, rc::Rc};
 
-    use panel_kit_core::badge::{tag_hue, BadgeClickKind, BadgeKind};
-    use panel_kit_core::{LayoutBuilder, Mode, PanelKind, PanelWin};
-    use panel_kit_tui::badge::{hue_color, Badge};
-    use panel_kit_tui::charts::{gauges, time_series, GaugeItem, Series};
+    use panel_kit_core::badge::BadgeClickKind;
+    use panel_kit_core::Mode;
+    use panel_kit_tui::badge::Badge;
+    use panel_kit_tui::charts::{gauges, time_series, Series};
     use panel_kit_tui::scroll;
     use panel_kit_tui::spinner::spinner;
     use panel_kit_tui::{Theme, TuiMouseButton, TuiMouseEvent, TuiMouseEventKind, TuiWorkspace};
@@ -45,113 +48,10 @@ mod browser {
         backend::webgl2::{FontAtlasConfig, WebGl2BackendOptions},
         CursorShape, WebGl2Backend, WebRenderer,
     };
-    use serde::{Deserialize, Serialize};
 
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    enum Panel {
-        Workspace,
-        Badges,
-        Activity,
-        Capacity,
-        Notes,
-        Theme,
-    }
-
-    impl PanelKind for Panel {
-        fn title(self) -> &'static str {
-            match self {
-                Panel::Workspace => "Workspace",
-                Panel::Badges => "Badges",
-                Panel::Activity => "Activity",
-                Panel::Capacity => "Capacity",
-                Panel::Notes => "Notes",
-                Panel::Theme => "Theme",
-            }
-        }
-    }
-
-    fn defaults() -> Vec<PanelWin<Panel>> {
-        let mut b = LayoutBuilder::new();
-        vec![
-            b.at(Panel::Workspace, 1.0, 0.0, 48.0, 12.0).with_tile(2, 2),
-            b.at(Panel::Badges, 51.0, 0.0, 58.0, 16.0).with_tile(2, 3),
-            b.at(Panel::Activity, 1.0, 13.0, 58.0, 15.0).with_tile(2, 3),
-            b.at(Panel::Capacity, 61.0, 17.0, 48.0, 10.0)
-                .with_tile(2, 2),
-            b.at(Panel::Notes, 1.0, 29.0, 64.0, 12.0).with_tile(3, 2),
-            b.at(Panel::Theme, 67.0, 28.0, 42.0, 10.0).with_tile(1, 2),
-        ]
-    }
-
-    fn demo_badges() -> Vec<Badge> {
-        let mut tag = Badge::new(BadgeKind::Tag, "tag", "browser-tui");
-        tag.override_color = Some(hue_color(tag_hue("browser-tui")));
-        let mut active = Badge::new(BadgeKind::Status, "status", "canary");
-        active.active = true;
-        vec![
-            tag,
-            Badge::new(BadgeKind::Doctype, "doctype", "example"),
-            Badge::new(BadgeKind::Folder, "folder", "crates/panel-kit-tui"),
-            Badge::new(BadgeKind::Author, "author", "olive"),
-            Badge::new(
-                BadgeKind::Entity {
-                    ty: Some("crate".into()),
-                },
-                "entity",
-                "panel-kit-core",
-            ),
-            Badge::new(
-                BadgeKind::Wikilink {
-                    resolved: true,
-                    target: "TuiWorkspace".into(),
-                },
-                "link",
-                "TuiWorkspace",
-            ),
-            Badge::new(
-                BadgeKind::Wikilink {
-                    resolved: false,
-                    target: "missing-doc".into(),
-                },
-                "link",
-                "missing-doc",
-            ),
-            Badge::new(
-                BadgeKind::Url {
-                    href: "https://github.com/ratatui/ratzilla".into(),
-                    host: "github.com".into(),
-                },
-                "url",
-                "ratzilla",
-            ),
-            Badge::new(BadgeKind::Date, "date", "2026-06-13"),
-            active,
-            Badge::new(BadgeKind::Generic, "mode", "wasm"),
-        ]
-    }
-
-    const EVAL_SERIES: &[(f64, f64)] = &[
-        (0.0, 8.0),
-        (1.0, 12.0),
-        (2.0, 11.0),
-        (3.0, 19.0),
-        (4.0, 24.0),
-        (5.0, 21.0),
-        (6.0, 28.0),
-        (7.0, 34.0),
-        (8.0, 31.0),
-    ];
-    const FRAME_SERIES: &[(f64, f64)] = &[
-        (0.0, 16.0),
-        (1.0, 16.5),
-        (2.0, 16.1),
-        (3.0, 17.2),
-        (4.0, 16.4),
-        (5.0, 16.0),
-        (6.0, 15.9),
-        (7.0, 16.3),
-        (8.0, 16.1),
-    ];
+    use crate::workspace_canary::{
+        capacity_items, defaults, demo_badges, Panel, EVAL_SERIES, FRAME_SERIES,
+    };
 
     struct App {
         ws: TuiWorkspace<Panel>,
@@ -274,10 +174,10 @@ mod browser {
                     f.render_widget(
                         Paragraph::new(vec![
                             Line::from(vec![
-                                Span::styled("panel-kit-tui in the browser", Style::default().fg(theme.fg)),
+                                Span::styled("panel-kit-tui backend canary", Style::default().fg(theme.fg)),
                             ]),
                             Line::from(""),
-                            Line::from("Ratzilla renders the ratatui shell to a WebGL canvas."),
+                            Line::from("The same ratatui workspace renders in terminal and browser."),
                             Line::from("The state machine is shared with the Dioxus renderer."),
                             Line::from(""),
                             Line::from("Mouse: drag headers, drag the corner grip, click lights."),
@@ -318,12 +218,7 @@ mod browser {
                     time_series(f, rect, &theme, "ms", &series);
                 }
                 Panel::Capacity => {
-                    let items = [
-                        GaugeItem { label: "vfs".into(), ratio: 0.21, text: "31 / 148 files".into() },
-                        GaugeItem { label: "wasm".into(), ratio: 0.63, text: "6.3 MB / 10 MB".into() },
-                        GaugeItem { label: "events".into(), ratio: 0.78, text: "78% queue".into() },
-                        GaugeItem { label: "layout".into(), ratio: 0.94, text: "94% stress".into() },
-                    ];
+                    let items = capacity_items();
                     gauges(f, rect, &theme, &items);
                 }
                 Panel::Notes => {
@@ -332,10 +227,10 @@ mod browser {
                         Line::from(""),
                     ];
                     for text in [
-                        "This browser example compiles the ratatui renderer to wasm.",
+                        "This example renders the ratatui workspace through a backend.",
                         "It exercises workspace panels, traffic lights, drag math, restore hooks, badges, action routing, charts, gauges, spinner frames, theming, and scrollbars.",
-                        "When this builds under Trunk, the TUI path is still web-capable.",
                         "When the native terminal example builds, the same public TUI API is still terminal-capable.",
+                        "When the browser example builds under Trunk, the same public TUI API is still web-capable.",
                         "Keeping both examples broad catches drift between core, Dioxus, and TUI renderers.",
                         "The example is not a screenshot fixture: it is executable documentation.",
                         "Use t for theme, 1-6 to restore minimized panels, and arrow keys to scroll this panel.",
@@ -343,7 +238,7 @@ mod browser {
                         lines.push(Line::from(text));
                     }
                     lines.push(Line::from(""));
-                    lines.push(spinner(tick, "browser TUI canary running", &theme));
+                    lines.push(spinner(tick, "TUI canary running", &theme));
                     self.notes_scroll = scroll::lines(f, rect, &theme, lines, self.notes_scroll);
                 }
                 Panel::Theme => {
