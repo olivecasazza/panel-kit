@@ -133,7 +133,9 @@ pub fn gauges(f: &mut Frame, area: Rect, t: &Theme, items: &[GaugeItem]) {
             Gauge::default()
                 .ratio(ratio)
                 .label(Span::styled(item.text.clone(), Style::default().fg(t.fg)))
-                .gauge_style(Style::default().fg(fill).bg(t.line))
+                // Unfilled track = panel background so an empty gauge reads
+                // empty; only the filled fraction shows the fill color.
+                .gauge_style(Style::default().fg(fill).bg(t.bg))
                 .use_unicode(true),
             bar,
         );
