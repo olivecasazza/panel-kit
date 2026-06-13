@@ -470,7 +470,7 @@ impl<K: PanelKind> Workspace<K> {
                             // height. Mobile keeps the pure-CSS single-column
                             // stack (no inline geometry).
                             format!(
-                                "flex:1 1 calc({}% - 8px); height:{}px;",
+                                "--panel-basis: calc({}% - 8px); height:{}px;",
                                 p.tile_w as f64 * (100.0 / TILE_W_MAX as f64),
                                 p.tile_h as f64 * TILE_ROW_PX
                             )
