@@ -35,7 +35,9 @@ mod browser {
     use panel_kit_tui::charts::{gauges, time_series, Series};
     use panel_kit_tui::scroll;
     use panel_kit_tui::spinner::spinner;
-    use panel_kit_tui::{Theme, TuiMouseButton, TuiMouseEvent, TuiMouseEventKind, TuiWorkspace};
+    use panel_kit_tui::{
+        Charset, Theme, TuiMouseButton, TuiMouseEvent, TuiMouseEventKind, TuiWorkspace,
+    };
     use ratatui::layout::{Position, Rect};
     use ratatui::style::{Color, Style};
     use ratatui::text::{Line, Span};
@@ -67,7 +69,8 @@ mod browser {
 
     impl App {
         fn new() -> Self {
-            let mut ws = TuiWorkspace::new(None, defaults);
+            // WebGL font atlas can't render box-drawing / geometric glyphs.
+            let mut ws = TuiWorkspace::new(None, defaults).charset(Charset::Ascii);
             ws.mode = Mode::Tiling;
             Self {
                 ws,

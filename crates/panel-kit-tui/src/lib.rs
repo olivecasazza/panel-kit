@@ -71,6 +71,39 @@ const ASCII_BORDER: border::Set<'static> = border::Set {
     horizontal_bottom: "-",
 };
 
+/// Which glyph set the chrome draws with. A native terminal renders
+/// box-drawing and geometric glyphs (rounded borders, ● / ◉ lights); the
+/// ratzilla WebGL backend drops non-atlas glyphs, so it opts into
+/// [`Charset::Ascii`]. Defaults to [`Charset::Unicode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Charset {
+    /// Rounded borders and ● / ◉ traffic lights (native terminal).
+    #[default]
+    Unicode,
+    /// `+ - |` borders and `o` / `O` lights (WebGL-safe).
+    Ascii,
+}
+
+impl Charset {
+    /// The panel border glyph set for this charset.
+    fn border(self) -> border::Set<'static> {
+        match self {
+            Charset::Unicode => border::ROUNDED,
+            Charset::Ascii => ASCII_BORDER,
+        }
+    }
+
+    /// The traffic-light glyph; `hovered` rings the light.
+    fn light(self, hovered: bool) -> char {
+        match (self, hovered) {
+            (Charset::Unicode, true) => '◉',
+            (Charset::Unicode, false) => '●',
+            (Charset::Ascii, true) => 'O',
+            (Charset::Ascii, false) => 'o',
+        }
+    }
+}
+
 fn rect_from_region(r: Region) -> Rect {
     Rect::new(r.x as u16, r.y as u16, r.w as u16, r.h as u16)
 }
@@ -131,6 +164,7 @@ pub struct TuiWorkspace<K: PanelKind> {
     zones: Vec<Zone>,
     dock_chips: Vec<(Rect, usize)>,
     hover: Option<Position>,
+    charset: Charset,
 }
 
 impl<K: PanelKind> TuiWorkspace<K> {
@@ -165,7 +199,16 @@ impl<K: PanelKind> TuiWorkspace<K> {
             zones: Vec::new(),
             dock_chips: Vec::new(),
             hover: None,
+            charset: Charset::default(),
         }
+    }
+
+    /// Render with the given [`Charset`]. Defaults to [`Charset::Unicode`]
+    /// (rounded borders, ● / ◉ lights); the ratzilla browser backend should
+    /// select [`Charset::Ascii`].
+    pub fn charset(mut self, charset: Charset) -> Self {
+        self.charset = charset;
+        self
     }
 
     /// Persist the layout now (also called automatically when a drag
@@ -199,6 +242,7 @@ impl<K: PanelKind> TuiWorkspace<K> {
     ) {
         self.zones.clear();
         self.dock_chips.clear();
+        let cs = self.charset;
         if area.height < 5 || area.width < 8 {
             let t = self.theme;
             f.render_widget(
@@ -207,7 +251,7 @@ impl<K: PanelKind> TuiWorkspace<K> {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_set(ASCII_BORDER)
+                            .border_set(cs.border())
                             .border_style(Style::default().fg(t.line2)),
                     ),
                 area,
@@ -223,13 +267,13 @@ impl<K: PanelKind> TuiWorkspace<K> {
 
         let root_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(ASCII_BORDER)
+            .border_set(cs.border())
             .border_style(Style::default().fg(t.line2));
         f.render_widget(root_block, root);
 
         let dock_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(ASCII_BORDER)
+            .border_set(cs.border())
             .border_style(Style::default().fg(t.line2));
         let dock_inner = dock_block.inner(dock);
         f.render_widget(dock_block, dock);
@@ -324,7 +368,7 @@ impl<K: PanelKind> TuiWorkspace<K> {
                 .and_then(|h| light_cells.iter().position(|c| c.contains(h)));
             let mut block = Block::default()
                 .borders(Borders::ALL)
-                .border_set(ASCII_BORDER)
+                .border_set(cs.border())
                 .border_style(border_style);
             let hovered_hint = hovered_light.map(|slot| match slot {
                 0 => {
@@ -361,11 +405,7 @@ impl<K: PanelKind> TuiWorkspace<K> {
                     1 => t.yellow,
                     _ => t.pink,
                 };
-                let ch = if hovered_light == Some(slot) {
-                    'O'
-                } else {
-                    'o'
-                };
+                let ch = cs.light(hovered_light == Some(slot));
                 if cell.x < rect.right() && cell.y < rect.bottom() {
                     f.buffer_mut()[(cell.x, cell.y)]
                         .set_char(ch)
