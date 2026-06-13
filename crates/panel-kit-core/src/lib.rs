@@ -403,6 +403,7 @@ pub fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64, c: &Clamp) -> (f64, 
 /// ([`effective_rect`]), which can differ from the stored geometry after a
 /// viewport shrink. Writing it back on grab keeps the drag math anchored to
 /// what's visible — no jump on the first pointer-move.
+#[allow(clippy::too_many_arguments)]
 pub fn begin_drag<K>(
     panels: &mut [PanelWin<K>],
     idx: usize,
@@ -452,6 +453,7 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
 /// `tiling` selects span-snapped resize (see [`begin_tile_resize`]); moves
 /// follow the pointer and floating resizes clamp to [`Clamp::min_w`]/
 /// [`Clamp::min_h`].
+#[allow(clippy::too_many_arguments)]
 pub fn apply_drag<K>(
     panels: &mut [PanelWin<K>],
     d: &Drag,
