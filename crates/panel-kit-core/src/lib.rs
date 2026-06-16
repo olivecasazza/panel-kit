@@ -256,6 +256,20 @@ pub struct PanelWin<K> {
     /// Tiling-mode height in rows (1–6). Defaults to 2.
     #[serde(default = "default_tile_h")]
     pub tile_h: u8,
+    /// Optional tiling flex-basis percentage. When unset, renderers derive
+    /// the basis from [`tile_w`](Self::tile_w).
+    #[serde(default)]
+    pub tile_basis_pct: Option<f64>,
+    /// Optional tiling flex-grow. When unset, renderers derive grow from
+    /// [`tile_h`](Self::tile_h).
+    #[serde(default)]
+    pub tile_grow: Option<f64>,
+    /// Optional tiling minimum width in renderer units.
+    #[serde(default)]
+    pub tile_min_w: Option<f64>,
+    /// Optional tiling minimum height in renderer units.
+    #[serde(default)]
+    pub tile_min_h: Option<f64>,
 }
 
 impl<K> PanelWin<K> {
@@ -264,6 +278,25 @@ impl<K> PanelWin<K> {
     pub fn with_tile(mut self, w: u8, h: u8) -> Self {
         self.tile_w = w.clamp(1, TILE_W_MAX);
         self.tile_h = h.clamp(1, TILE_H_MAX);
+        self
+    }
+
+    /// Override the flexbox sizing used by tiling renderers.
+    ///
+    /// `basis_pct` is the preferred width as a percentage of the tiling
+    /// workspace. `grow` is the relative share of remaining vertical space.
+    /// This keeps app layouts declarative without forcing apps to calculate
+    /// viewport pixel rectangles.
+    pub fn with_tile_flex(mut self, basis_pct: f64, grow: f64) -> Self {
+        self.tile_basis_pct = Some(basis_pct.clamp(0.0, 100.0));
+        self.tile_grow = Some(grow.max(0.0));
+        self
+    }
+
+    /// Override the minimum tile size used by tiling renderers.
+    pub fn with_tile_min(mut self, min_w: f64, min_h: f64) -> Self {
+        self.tile_min_w = Some(min_w.max(0.0));
+        self.tile_min_h = Some(min_h.max(0.0));
         self
     }
 }
@@ -295,6 +328,10 @@ impl LayoutBuilder {
             z: self.z,
             tile_w: default_tile_w(),
             tile_h: default_tile_h(),
+            tile_basis_pct: None,
+            tile_grow: None,
+            tile_min_w: None,
+            tile_min_h: None,
         }
     }
 }

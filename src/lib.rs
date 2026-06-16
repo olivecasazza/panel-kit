@@ -87,17 +87,23 @@
 
 pub mod badge;
 
+#[cfg(feature = "bevy")]
+pub mod bevy;
+#[cfg(feature = "bevy")]
+pub use bevy::{get_bevy_handle, BevyCanvas, BEVY_CSS};
+
 use dioxus::events::MouseEvent;
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
+use wasm_bindgen::JsCast;
 
-pub use panel_kit_core::{
-    Drag, DragKind, LayoutBuilder, Mode, PanelKind, PanelWin, WinState, TILE_ROW_PX,
-};
 use panel_kit_core::{
     apply_drag, begin_drag as core_begin_drag, begin_tile_resize as core_begin_tile_resize,
     effective_rect as core_effective_rect, front_z, kind_slug, merge_defaults,
     reorder_tile as core_reorder_tile, Clamp, SavedLayout, TileMetrics, TILE_W_MAX,
+};
+pub use panel_kit_core::{
+    Drag, DragKind, LayoutBuilder, Mode, PanelKind, PanelWin, WinState, TILE_ROW_PX,
 };
 
 /// Base stylesheet for the workspace chrome (panels, lights, dock, badges,
@@ -107,6 +113,20 @@ use panel_kit_core::{
 /// [crate-level theming notes](crate#theming)).
 pub const CSS: &str = include_str!("../assets/panel-kit.css");
 
+/// Flex direction used by the web tiling renderer.
+///
+/// `Row` is the original panel-kit flow: tiles wrap left-to-right into rows.
+/// `Column` stacks tiles top-to-bottom, then wraps into additional columns;
+/// it is useful for sidebar/main layouts where a few smaller panels should
+/// share one column and a primary panel should occupy the next column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TilingFlow {
+    /// Wrap tiles left-to-right into rows.
+    Row,
+    /// Stack tiles top-to-bottom, then wrap into additional columns.
+    Column,
+}
+
 // The core types (PanelKind, PanelWin, WinState, Mode, Drag, LayoutBuilder)
 // and all geometry/drag math live in panel-kit-core and are re-exported
 // above — this crate is the Dioxus shell: signals, DOM events, CSS,
@@ -114,14 +134,42 @@ pub const CSS: &str = include_str!("../assets/panel-kit.css");
 
 fn viewport_size() -> (f64, f64) {
     let win = web_sys::window();
-    let vw = win.as_ref().and_then(|w| w.inner_width().ok()).and_then(|v| v.as_f64()).unwrap_or(1280.0);
-    let vh = win.and_then(|w| w.inner_height().ok()).and_then(|v| v.as_f64()).unwrap_or(800.0);
+    let vw = win
+        .as_ref()
+        .and_then(|w| w.inner_width().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1280.0);
+    let vh = win
+        .and_then(|w| w.inner_height().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(800.0);
     (vw, vh)
 }
 
 /// Render-time viewport clamp — core math with the web px metrics.
 fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64) -> (f64, f64, f64, f64) {
     core_effective_rect(p, vw, vh, &Clamp::WEB)
+}
+
+fn tile_basis_pct<K>(p: &PanelWin<K>) -> f64 {
+    p.tile_basis_pct
+        .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64))
+        .clamp(0.0, 100.0)
+}
+
+fn tiling_column_count<K>(panels: &[PanelWin<K>], visible: &[usize]) -> usize {
+    let mut cols = 1usize;
+    let mut used = 0.0f64;
+    for &idx in visible {
+        let basis = tile_basis_pct(&panels[idx]);
+        if used > 0.0 && used + basis > 100.01 {
+            cols += 1;
+            used = basis;
+        } else {
+            used += basis;
+        }
+    }
+    cols.max(1)
 }
 
 /// Narrow viewport (< 760 px wide) → mobile shell (static stacked tiling
@@ -152,17 +200,33 @@ pub fn is_editing() -> bool {
 }
 
 fn save_layout<K: PanelKind>(key: &str, panels: &[PanelWin<K>], mode: Mode) {
-    let _ = LocalStorage::set(key, SavedLayout { panels: panels.to_vec(), tiling: mode == Mode::Tiling });
+    let _ = LocalStorage::set(
+        key,
+        SavedLayout {
+            panels: panels.to_vec(),
+            tiling: mode == Mode::Tiling,
+        },
+    );
 }
 
 /// Load the saved layout, reconciling against the current panel set: panels
 /// added since the layout was saved are appended with their default placement,
 /// so new features still show up for existing users.
-fn load_layout<K: PanelKind>(key: &str, defaults: &[PanelWin<K>]) -> Option<(Vec<PanelWin<K>>, Mode)> {
+fn load_layout<K: PanelKind>(
+    key: &str,
+    defaults: &[PanelWin<K>],
+) -> Option<(Vec<PanelWin<K>>, Mode)> {
     let saved: SavedLayout<K> = LocalStorage::get(key).ok()?;
     let mut panels = saved.panels;
     merge_defaults(&mut panels, defaults);
-    Some((panels, if saved.tiling { Mode::Tiling } else { Mode::Floating }))
+    Some((
+        panels,
+        if saved.tiling {
+            Mode::Tiling
+        } else {
+            Mode::Floating
+        },
+    ))
 }
 
 /// The workspace handle: a bundle of `Copy` signals, safe to pass around and
@@ -219,8 +283,12 @@ pub fn use_workspace<K: PanelKind>(
     defaults: fn() -> Vec<PanelWin<K>>,
 ) -> Workspace<K> {
     let saved = load_layout(storage_key, &defaults());
-    let panels =
-        use_signal(|| saved.as_ref().map(|(p, _)| p.clone()).unwrap_or_else(defaults));
+    let panels = use_signal(|| {
+        saved
+            .as_ref()
+            .map(|(p, _)| p.clone())
+            .unwrap_or_else(defaults)
+    });
     let mode = use_signal(|| saved.as_ref().map(|(_, m)| *m).unwrap_or(Mode::Floating));
     let drag = use_signal(|| Option::<Drag>::None);
     let tile_drag = use_signal(|| Option::<K>::None);
@@ -229,7 +297,6 @@ pub fn use_workspace<K: PanelKind>(
 
     use_hook(|| {
         use wasm_bindgen::closure::Closure;
-        use wasm_bindgen::JsCast;
         let mut viewport = viewport;
         let mut is_mobile = is_mobile;
         let mut panels = panels;
@@ -247,10 +314,7 @@ pub fn use_workspace<K: PanelKind>(
             let (ow, oh) = *viewport.peek();
             if ow > 1.0 && oh > 1.0 {
                 let (fx, fy) = (nw / ow, nh / oh);
-                if fx.is_finite()
-                    && fy.is_finite()
-                    && (fx - 1.0).abs() + (fy - 1.0).abs() > 1e-3
-                {
+                if fx.is_finite() && fy.is_finite() && (fx - 1.0).abs() + (fy - 1.0).abs() > 1e-3 {
                     let mut ps = panels.write();
                     for p in ps.iter_mut() {
                         p.x *= fx;
@@ -302,7 +366,14 @@ pub fn use_workspace<K: PanelKind>(
         }
     });
 
-    Workspace { panels, mode, drag, tile_drag, is_mobile, viewport }
+    Workspace {
+        panels,
+        mode,
+        drag,
+        tile_drag,
+        is_mobile,
+        viewport,
+    }
 }
 
 impl<K: PanelKind> Workspace<K> {
@@ -349,7 +420,16 @@ impl<K: PanelKind> Workspace<K> {
         // anchored to what's visible — no jump on the first mousemove.
         let (vw, vh) = *self.viewport.read();
         let mut panels = self.panels;
-        let d = core_begin_drag(&mut *panels.write(), idx, kind, c.x, c.y, vw, vh, &Clamp::WEB);
+        let d = core_begin_drag(
+            &mut *panels.write(),
+            idx,
+            kind,
+            c.x,
+            c.y,
+            vw,
+            vh,
+            &Clamp::WEB,
+        );
         if d.is_some() {
             let mut drag = self.drag;
             drag.set(d);
@@ -425,6 +505,19 @@ impl<K: PanelKind> Workspace<K> {
     /// (slugified from [`PanelKind::title`]) so apps can style individual
     /// panels — e.g. making one full-width in tiling mode.
     pub fn render(&self, body: impl Fn(K, bool) -> Element) -> Element {
+        self.render_with_tiling_flow(TilingFlow::Row, body)
+    }
+
+    /// Render the workspace with a specific flex direction for tiling mode.
+    ///
+    /// Floating and maximized modes are unchanged. In tiling mode, `Row`
+    /// preserves the default left-to-right wrapping layout; `Column` stacks
+    /// panels top-to-bottom and wraps into columns.
+    pub fn render_with_tiling_flow(
+        &self,
+        flow: TilingFlow,
+        body: impl Fn(K, bool) -> Element,
+    ) -> Element {
         let ws = *self;
         let mode_now = self.effective_mode();
         let ps = self.panels.read().clone();
@@ -441,14 +534,25 @@ impl<K: PanelKind> Workspace<K> {
         let ws_class = if maximized.is_some() {
             "ws maxed"
         } else if mode_now == Mode::Tiling {
-            "ws tiling"
+            match flow {
+                TilingFlow::Row => "ws tiling",
+                TilingFlow::Column => "ws tiling tiling-column",
+            }
         } else {
             "ws floating"
         };
+        let ws_style =
+            if maximized.is_none() && mode_now == Mode::Tiling && flow == TilingFlow::Column {
+                let cols = tiling_column_count(&ps, &visible);
+                let gaps = cols.saturating_sub(1) * 8;
+                format!("--tile-column-width: calc((100% - {gaps}px) / {cols});")
+            } else {
+                String::new()
+            };
 
         let dragging_tile = *self.tile_drag.read();
         rsx! {
-            div { class: "{ws_class}",
+            div { class: "{ws_class}", style: "{ws_style}",
                 for i in visible.iter().copied() {
                     {
                         let p = ps[i];
@@ -466,13 +570,17 @@ impl<K: PanelKind> Workspace<K> {
                             format!("position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; z-index:{};",
                                 p.z)
                         } else if tiling && !*ws.is_mobile.read() {
-                            // Snapped spans → flex-basis % of the row + row
-                            // height. Mobile keeps the pure-CSS single-column
-                            // stack (no inline geometry).
+                            // Snapped spans → flex-basis % width + flex-grow for
+                            // vertical sizing. tile_h controls relative height via
+                            // flex-grow so panels expand to fill available space.
+                            let basis_pct = tile_basis_pct(&p);
+                            let grow = p.tile_grow.unwrap_or(p.tile_h as f64);
+                            let min_w = p.tile_min_w.unwrap_or(300.0);
+                            let min_h = p
+                                .tile_min_h
+                                .unwrap_or_else(|| p.tile_h as f64 * TILE_ROW_PX * 0.5);
                             format!(
-                                "--panel-basis: calc({}% - 8px); height:{}px;",
-                                p.tile_w as f64 * (100.0 / TILE_W_MAX as f64),
-                                p.tile_h as f64 * TILE_ROW_PX
+                                "--panel-basis: calc({basis_pct}% - 8px); --panel-grow: {grow}; --panel-min-w: {min_w}px; --panel-min-h: {min_h}px;"
                             )
                         } else {
                             String::new()
@@ -684,8 +792,15 @@ pub fn Spinner(
 /// ready for `position: fixed; left:{x}px; top:{y}px`.
 pub fn tip_pos(cx: f64, cy: f64, tw: f64, th: f64) -> (f64, f64) {
     let win = web_sys::window();
-    let vw = win.as_ref().and_then(|w| w.inner_width().ok()).and_then(|v| v.as_f64()).unwrap_or(1280.0);
-    let vh = win.and_then(|w| w.inner_height().ok()).and_then(|v| v.as_f64()).unwrap_or(800.0);
+    let vw = win
+        .as_ref()
+        .and_then(|w| w.inner_width().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1280.0);
+    let vh = win
+        .and_then(|w| w.inner_height().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(800.0);
     let mut x = cx - tw - 14.0;
     if x < 8.0 {
         x = cx + 14.0;
