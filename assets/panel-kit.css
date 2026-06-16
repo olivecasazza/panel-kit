@@ -61,8 +61,8 @@ button { font-family:var(--mono); }
   min-height:var(--panel-min-h, 110px);
   height:auto; }
 .ws.tiling.tiling-column .panel {
-  width:var(--tile-column-width, auto);
-  max-width:var(--tile-column-width, none);
+  width:var(--panel-cross-size, var(--tile-column-width, auto));
+  max-width:var(--panel-cross-size, var(--tile-column-width, none));
 }
 .ws.maxed { padding:0; }
 

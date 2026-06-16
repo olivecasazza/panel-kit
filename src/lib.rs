@@ -257,6 +257,8 @@ pub struct Workspace<K: PanelKind> {
     /// floating panels re-project through the viewport clamp on every
     /// resize (both directions).
     pub viewport: Signal<(f64, f64)>,
+    /// Last tiling flow requested by the renderer, used by tiling resize.
+    pub tiling_flow: Signal<TilingFlow>,
 }
 
 impl<K: PanelKind> Clone for Workspace<K> {
@@ -294,6 +296,7 @@ pub fn use_workspace<K: PanelKind>(
     let tile_drag = use_signal(|| Option::<K>::None);
     let is_mobile = use_signal(viewport_is_mobile);
     let viewport = use_signal(viewport_size);
+    let tiling_flow = use_signal(|| TilingFlow::Row);
 
     use_hook(|| {
         use wasm_bindgen::closure::Closure;
@@ -373,6 +376,7 @@ pub fn use_workspace<K: PanelKind>(
         tile_drag,
         is_mobile,
         viewport,
+        tiling_flow,
     }
 }
 
@@ -460,6 +464,7 @@ impl<K: PanelKind> Workspace<K> {
             let c = e.client_coordinates();
             let tiling = self.effective_mode() == Mode::Tiling;
             let (vw, _) = *self.viewport.read();
+            let column_flow = *self.tiling_flow.read() == TilingFlow::Column;
             let mut panels = self.panels;
             apply_drag(
                 &mut *panels.write(),
@@ -469,7 +474,7 @@ impl<K: PanelKind> Workspace<K> {
                 tiling,
                 vw,
                 &Clamp::WEB,
-                &TileMetrics::WEB,
+                &TileMetrics::WEB.with_column_flow(column_flow),
             );
         }
     }
@@ -518,6 +523,9 @@ impl<K: PanelKind> Workspace<K> {
         flow: TilingFlow,
         body: impl Fn(K, bool) -> Element,
     ) -> Element {
+        let mut tiling_flow = self.tiling_flow;
+        tiling_flow.set(flow);
+
         let ws = *self;
         let mode_now = self.effective_mode();
         let ps = self.panels.read().clone();
@@ -570,17 +578,23 @@ impl<K: PanelKind> Workspace<K> {
                             format!("position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; z-index:{};",
                                 p.z)
                         } else if tiling && !*ws.is_mobile.read() {
-                            // Snapped spans → flex-basis % width + flex-grow for
-                            // vertical sizing. tile_h controls relative height via
-                            // flex-grow so panels expand to fill available space.
+                            // Snapped spans → flex-basis on the main tiling axis.
+                            // Column flow can also opt into a cross-axis width,
+                            // letting apps express sidebar/main tiling ratios.
                             let basis_pct = tile_basis_pct(&p);
                             let grow = p.tile_grow.unwrap_or(p.tile_h as f64);
                             let min_w = p.tile_min_w.unwrap_or(300.0);
                             let min_h = p
                                 .tile_min_h
                                 .unwrap_or_else(|| p.tile_h as f64 * TILE_ROW_PX * 0.5);
+                            let cross = match (flow, p.tile_cross_pct) {
+                                (TilingFlow::Column, Some(cross_pct)) => {
+                                    format!(" --panel-cross-size: calc({cross_pct}% - 8px);")
+                                }
+                                _ => String::new(),
+                            };
                             format!(
-                                "--panel-basis: calc({basis_pct}% - 8px); --panel-grow: {grow}; --panel-min-w: {min_w}px; --panel-min-h: {min_h}px;"
+                                "--panel-basis: calc({basis_pct}% - 8px); --panel-grow: {grow}; --panel-min-w: {min_w}px; --panel-min-h: {min_h}px;{cross}"
                             )
                         } else {
                             String::new()

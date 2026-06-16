@@ -188,7 +188,9 @@ pub fn workspace_chrome(width: f64, height: f64, metrics: &ChromeMetrics) -> Wor
 ///
 /// For a tiling resize started with [`begin_tile_resize`], `start_w`/
 /// `start_h` hold the *tile spans*, not length units — [`apply_drag`]
-/// branches on `tiling`.
+/// branches on `tiling`. The optional flex fields capture percentage/grow
+/// values for flex-based tiles so pointer deltas are applied from the
+/// pointer-down state, not compounded across mousemove events.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Drag {
     /// Index of the dragged panel in the workspace `Vec`.
@@ -207,6 +209,12 @@ pub struct Drag {
     pub start_w: f64,
     /// Panel height (or tiling height span) at pointer-down.
     pub start_h: f64,
+    /// Optional tiling flex basis at pointer-down.
+    pub start_basis_pct: Option<f64>,
+    /// Optional tiling flex grow at pointer-down.
+    pub start_grow: Option<f64>,
+    /// Optional tiling cross-axis size at pointer-down.
+    pub start_cross_pct: Option<f64>,
 }
 
 /// Tiling-mode row height unit in the web shell's px — kept here so both
@@ -264,6 +272,10 @@ pub struct PanelWin<K> {
     /// [`tile_h`](Self::tile_h).
     #[serde(default)]
     pub tile_grow: Option<f64>,
+    /// Optional tiling cross-axis size percentage. Row tiling may use this
+    /// as a height hint; column tiling uses it as the column width.
+    #[serde(default)]
+    pub tile_cross_pct: Option<f64>,
     /// Optional tiling minimum width in renderer units.
     #[serde(default)]
     pub tile_min_w: Option<f64>,
@@ -290,6 +302,16 @@ impl<K> PanelWin<K> {
     pub fn with_tile_flex(mut self, basis_pct: f64, grow: f64) -> Self {
         self.tile_basis_pct = Some(basis_pct.clamp(0.0, 100.0));
         self.tile_grow = Some(grow.max(0.0));
+        self
+    }
+
+    /// Override the cross-axis size used by tiling renderers.
+    ///
+    /// In column-wrapping tiling this is the column width as a percentage of
+    /// the workspace. In row-wrapping tiling renderers may use it as a row
+    /// height hint.
+    pub fn with_tile_cross(mut self, cross_pct: f64) -> Self {
+        self.tile_cross_pct = Some(cross_pct.clamp(0.0, 100.0));
         self
     }
 
@@ -330,6 +352,7 @@ impl LayoutBuilder {
             tile_h: default_tile_h(),
             tile_basis_pct: None,
             tile_grow: None,
+            tile_cross_pct: None,
             tile_min_w: None,
             tile_min_h: None,
         }
@@ -393,6 +416,8 @@ pub struct TileMetrics {
     /// Horizontal chrome subtracted from the viewport before computing the
     /// column width.
     pub outer: f64,
+    /// Whether the renderer lays tiles out in column-wrapping flex flow.
+    pub column_flow: bool,
 }
 
 impl TileMetrics {
@@ -401,6 +426,7 @@ impl TileMetrics {
         row: TILE_ROW_PX,
         col_floor: 80.0,
         outer: 16.0,
+        column_flow: false,
     };
 
     /// Character-cell defaults for terminal shells.
@@ -408,7 +434,14 @@ impl TileMetrics {
         row: 6.0,
         col_floor: 12.0,
         outer: 0.0,
+        column_flow: false,
     };
+
+    /// Return metrics with column-wrapping flex flow enabled.
+    pub fn with_column_flow(mut self, column_flow: bool) -> Self {
+        self.column_flow = column_flow;
+        self
+    }
 }
 
 /// Next z value that stacks in front of every panel.
@@ -462,6 +495,9 @@ pub fn begin_drag<K>(
         start_y: p.y,
         start_w: p.w,
         start_h: p.h,
+        start_basis_pct: None,
+        start_grow: None,
+        start_cross_pct: None,
     })
 }
 
@@ -481,6 +517,9 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
         start_y: 0.0,
         start_w: p.tile_w as f64,
         start_h: p.tile_h as f64,
+        start_basis_pct: p.tile_basis_pct,
+        start_grow: p.tile_grow,
+        start_cross_pct: p.tile_cross_pct,
     })
 }
 
@@ -508,11 +547,38 @@ pub fn apply_drag<K>(
             p.y = (d.start_y + (my - d.start_my)).max(0.0);
         }
         DragKind::Resize if tiling => {
-            let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
-            let dw = ((mx - d.start_mx) / col).round();
-            let dh = ((my - d.start_my) / t.row).round();
-            p.tile_w = (d.start_w + dw).clamp(1.0, TILE_W_MAX as f64) as u8;
-            p.tile_h = (d.start_h + dh).clamp(1.0, TILE_H_MAX as f64) as u8;
+            if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
+                let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
+                if t.column_flow {
+                    let basis = d
+                        .start_basis_pct
+                        .or(p.tile_basis_pct)
+                        .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
+                    let cross = d
+                        .start_cross_pct
+                        .or(p.tile_cross_pct)
+                        .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
+                    p.tile_basis_pct =
+                        Some((basis + ((my - d.start_my) / t.row) * 6.0).clamp(10.0, 100.0));
+                    p.tile_cross_pct =
+                        Some((cross + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0));
+                } else {
+                    let basis = d
+                        .start_basis_pct
+                        .or(p.tile_basis_pct)
+                        .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
+                    let grow = d.start_grow.or(p.tile_grow).unwrap_or(p.tile_h as f64);
+                    p.tile_basis_pct =
+                        Some((basis + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0));
+                    p.tile_grow = Some((grow + (my - d.start_my) / t.row).max(0.25));
+                }
+            } else {
+                let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
+                let dw = ((mx - d.start_mx) / col).round();
+                let dh = ((my - d.start_my) / t.row).round();
+                p.tile_w = (d.start_w + dw).clamp(1.0, TILE_W_MAX as f64) as u8;
+                p.tile_h = (d.start_h + dh).clamp(1.0, TILE_H_MAX as f64) as u8;
+            }
         }
         DragKind::Resize => {
             p.w = (d.start_w + (mx - d.start_mx)).max(c.min_w);
