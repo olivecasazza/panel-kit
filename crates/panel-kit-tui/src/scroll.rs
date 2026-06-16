@@ -65,3 +65,14 @@ pub fn lines(f: &mut Frame, area: Rect, t: &Theme, content: Vec<Line>, offset: u
     }
     off
 }
+
+/// Hard-wrap `s` into lines of at most `width` characters (character-based,
+/// no word boundaries). Returns the string as a single line when it fits or
+/// `width` is zero. Pairs with [`lines`] for laying out free text in a panel.
+pub fn wrap(s: &str, width: usize) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    if width == 0 || chars.len() <= width {
+        return vec![s.to_string()];
+    }
+    chars.chunks(width).map(|c| c.iter().collect()).collect()
+}

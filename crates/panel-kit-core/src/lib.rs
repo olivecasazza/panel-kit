@@ -81,7 +81,7 @@ pub enum PointerButton {
 }
 
 /// Abstract pointer event kind understood by renderer shells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PointerEventKind {
     /// A pointer button was pressed.
     Down(PointerButton),
@@ -91,6 +91,13 @@ pub enum PointerEventKind {
     Drag(PointerButton),
     /// Pointer moved without an active drag.
     Moved,
+    /// The scroll wheel turned by `delta_y` renderer units (positive scrolls
+    /// the workspace content up, i.e. reveals content further down). Shells
+    /// route this to the workspace-level vertical scroll.
+    Scroll {
+        /// Vertical wheel delta in renderer units.
+        delta_y: f64,
+    },
 }
 
 /// Renderer-neutral pointer event.
@@ -396,6 +403,39 @@ pub fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64, c: &Clamp) -> (f64, 
     (x, y, w, h)
 }
 
+/// Total height the floating panels occupy from the workspace top: the
+/// largest `y + h` across `indices` (using each panel's *stored* geometry, so
+/// the figure reflects the user's intent rather than the on-screen clamp).
+/// Returns `0.0` for an empty set. Shells feed this to [`max_scroll`] /
+/// [`clamp_scroll`] to bound workspace-level vertical scrolling in floating
+/// mode.
+pub fn floating_content_height<K>(panels: &[PanelWin<K>], indices: &[usize]) -> f64 {
+    indices
+        .iter()
+        .filter_map(|&i| panels.get(i))
+        .map(|p| p.y + p.h)
+        .fold(0.0_f64, f64::max)
+}
+
+/// The furthest the workspace can scroll vertically: how far the laid-out
+/// content (`content_h`) overhangs the viewport (`viewport_h`), never below
+/// zero. When content fits, the result is `0.0` and the shell pins the scroll
+/// offset to the top.
+///
+/// Units are the renderer's own (CSS px on the web, character cells in a
+/// terminal). Shells compute `content_h` from their own layout pass and clamp
+/// their stored scroll offset with [`clamp_scroll`].
+pub fn max_scroll(content_h: f64, viewport_h: f64) -> f64 {
+    (content_h - viewport_h).max(0.0)
+}
+
+/// Clamp a candidate vertical scroll offset to `[0, max_scroll(..)]`, so the
+/// workspace can never scroll above its top edge or past the bottom of its
+/// laid-out content.
+pub fn clamp_scroll(offset: f64, content_h: f64, viewport_h: f64) -> f64 {
+    offset.clamp(0.0, max_scroll(content_h, viewport_h))
+}
+
 /// Start a floating-mode move/resize drag from a pointer-down at
 /// `(mx, my)`, capturing panel geometry into a [`Drag`].
 ///
@@ -403,6 +443,7 @@ pub fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64, c: &Clamp) -> (f64, 
 /// ([`effective_rect`]), which can differ from the stored geometry after a
 /// viewport shrink. Writing it back on grab keeps the drag math anchored to
 /// what's visible — no jump on the first pointer-move.
+#[allow(clippy::too_many_arguments)]
 pub fn begin_drag<K>(
     panels: &mut [PanelWin<K>],
     idx: usize,
@@ -452,6 +493,7 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
 /// `tiling` selects span-snapped resize (see [`begin_tile_resize`]); moves
 /// follow the pointer and floating resizes clamp to [`Clamp::min_w`]/
 /// [`Clamp::min_h`].
+#[allow(clippy::too_many_arguments)]
 pub fn apply_drag<K>(
     panels: &mut [PanelWin<K>],
     d: &Drag,
