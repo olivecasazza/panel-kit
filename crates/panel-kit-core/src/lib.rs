@@ -559,7 +559,7 @@ pub fn apply_drag<K>(
                         .or(p.tile_cross_pct)
                         .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
                     p.tile_basis_pct =
-                        Some((basis + ((my - d.start_my) / t.row) * 6.0).clamp(10.0, 100.0));
+                        Some((basis + ((my - d.start_my) / t.row) * 25.0).clamp(10.0, 100.0));
                     p.tile_cross_pct =
                         Some((cross + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0));
                 } else {
