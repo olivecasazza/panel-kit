@@ -95,6 +95,7 @@ pub use bevy::{get_bevy_handle, BevyCanvas, BEVY_CSS};
 use dioxus::events::MouseEvent;
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
+use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 
 use panel_kit_core::{
@@ -125,6 +126,62 @@ pub enum TilingFlow {
     Row,
     /// Stack tiles top-to-bottom, then wrap into additional columns.
     Column,
+}
+
+/// Optional loading/progress state for a panel.
+///
+/// The shape is intentionally small and renderer-friendly: apps can update it
+/// from fetches, wasm loaders, file uploads, streaming jobs, or long-running
+/// simulation setup. With `total == None` it behaves like an indeterminate
+/// loader; with `total == Some(n)` it renders as determinate progress, like a
+/// compact browser-side `tqdm`.
+#[derive(Clone, PartialEq)]
+pub struct PanelLoading {
+    /// Short label for the active operation, e.g. `"loading notebook"`.
+    pub label: String,
+    /// Optional secondary status, e.g. `"13 / 42 chunks"`.
+    pub detail: Option<String>,
+    /// Current completed units.
+    pub current: f64,
+    /// Total units for determinate progress. `None` means indeterminate.
+    pub total: Option<f64>,
+}
+
+impl PanelLoading {
+    /// Create an indeterminate loading state with a label.
+    pub fn indeterminate(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            current: 0.0,
+            total: None,
+        }
+    }
+
+    /// Create a determinate loading state.
+    pub fn progress(label: impl Into<String>, current: f64, total: f64) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            current,
+            total: Some(total.max(0.0)),
+        }
+    }
+
+    /// Attach secondary detail text.
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    /// Return normalized progress in `[0, 1]` when determinate.
+    pub fn fraction(&self) -> Option<f64> {
+        let total = self.total?;
+        if total <= 0.0 {
+            return Some(0.0);
+        }
+        Some((self.current / total).clamp(0.0, 1.0))
+    }
 }
 
 // The core types (PanelKind, PanelWin, WinState, Mode, Drag, LayoutBuilder)
@@ -259,6 +316,8 @@ pub struct Workspace<K: PanelKind> {
     pub viewport: Signal<(f64, f64)>,
     /// Last tiling flow requested by the renderer, used by tiling resize.
     pub tiling_flow: Signal<TilingFlow>,
+    /// Optional per-panel loading/progress states.
+    pub loading: Signal<HashMap<K, PanelLoading>>,
 }
 
 impl<K: PanelKind> Clone for Workspace<K> {
@@ -297,6 +356,7 @@ pub fn use_workspace<K: PanelKind>(
     let is_mobile = use_signal(viewport_is_mobile);
     let viewport = use_signal(viewport_size);
     let tiling_flow = use_signal(|| TilingFlow::Row);
+    let loading = use_signal(HashMap::<K, PanelLoading>::new);
 
     use_hook(|| {
         use wasm_bindgen::closure::Closure;
@@ -377,6 +437,7 @@ pub fn use_workspace<K: PanelKind>(
         is_mobile,
         viewport,
         tiling_flow,
+        loading,
     }
 }
 
@@ -406,6 +467,41 @@ impl<K: PanelKind> Workspace<K> {
         } else {
             "ws-root"
         }
+    }
+
+    /// Set or replace loading/progress state for a panel.
+    ///
+    /// Apps can call this from any event boundary that knows a panel kind:
+    /// fetch start/end, iframe `onload`, wasm module initialization, file
+    /// uploads, websocket messages, or an async task progress callback.
+    pub fn set_loading(&self, kind: K, loading: PanelLoading) {
+        let mut states = self.loading;
+        states.write().insert(kind, loading);
+    }
+
+    /// Update a determinate panel progress value while preserving label/detail.
+    /// If the panel has no loading state yet, this creates a generic one.
+    pub fn set_loading_progress(&self, kind: K, current: f64, total: f64) {
+        let mut states = self.loading;
+        states
+            .write()
+            .entry(kind)
+            .and_modify(|state| {
+                state.current = current;
+                state.total = Some(total.max(0.0));
+            })
+            .or_insert_with(|| PanelLoading::progress("loading", current, total));
+    }
+
+    /// Clear the loading/progress state for a panel.
+    pub fn clear_loading(&self, kind: K) {
+        let mut states = self.loading;
+        states.write().remove(&kind);
+    }
+
+    /// Read the current loading/progress state for a panel.
+    pub fn loading_state(&self, kind: K) -> Option<PanelLoading> {
+        self.loading.read().get(&kind).cloned()
     }
 
     /// Start a floating-mode move/resize drag from a mousedown, capturing
@@ -632,6 +728,9 @@ impl<K: PanelKind> Workspace<K> {
                                 {ws.header(i, p.kind, floating, tiling)}
                                 div { class: "panel-body",
                                     {body(p.kind, maximized == Some(i))}
+                                    if let Some(loading) = ws.loading_state(p.kind) {
+                                        {Self::loading_overlay(loading)}
+                                    }
                                 }
                                 if floating || (tiling && !*ws.is_mobile.read()) {
                                     div {
@@ -706,6 +805,34 @@ impl<K: PanelKind> Workspace<K> {
                 }
                 span { class: "panel-title", title: "{title}", "{title}" }
                 if is_max { span { class: "max-hint", "maximized" } }
+            }
+        }
+    }
+
+    fn loading_overlay(loading: PanelLoading) -> Element {
+        let label = loading.label.clone();
+        let detail = loading.detail.clone();
+        let pct = loading.fraction().map(|f| (f * 100.0).round());
+        let fill_style = pct
+            .map(|pct| format!("width:{pct}%;"))
+            .unwrap_or_else(|| "".to_string());
+        rsx! {
+            div { class: "panel-loading", role: "status", "aria-live": "polite",
+                div { class: "panel-loading-card",
+                    Spinner { label: label.clone() }
+                    if let Some(detail) = detail {
+                        div { class: "panel-loading-detail", "{detail}" }
+                    }
+                    div { class: "panel-loading-track",
+                        div {
+                            class: if pct.is_some() { "panel-loading-fill" } else { "panel-loading-fill indeterminate" },
+                            style: "{fill_style}",
+                        }
+                    }
+                    if let Some(pct) = pct {
+                        div { class: "panel-loading-percent", "{pct}%" }
+                    }
+                }
             }
         }
     }
