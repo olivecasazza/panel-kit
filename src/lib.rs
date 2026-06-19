@@ -318,6 +318,15 @@ pub struct Workspace<K: PanelKind> {
     pub tiling_flow: Signal<TilingFlow>,
     /// Optional per-panel loading/progress states.
     pub loading: Signal<HashMap<K, PanelLoading>>,
+    /// When true, tiling resize snaps to tile-span grid units. When false,
+    /// resize is freeform pixel-perfect (like floating mode). Defaults to
+    /// true (snap), matching the original behavior.
+    pub snap_resize: Signal<bool>,
+    /// When true, tiling header drag snaps panels into discrete slots
+    /// (reorder). When false, header drag does nothing in tiling — panels
+    /// stay put and can only be resized, not rearranged. Defaults to true
+    /// (snap), matching the original behavior.
+    pub snap_move: Signal<bool>,
 }
 
 impl<K: PanelKind> Clone for Workspace<K> {
@@ -357,6 +366,8 @@ pub fn use_workspace<K: PanelKind>(
     let viewport = use_signal(viewport_size);
     let tiling_flow = use_signal(|| TilingFlow::Row);
     let loading = use_signal(HashMap::<K, PanelLoading>::new);
+    let snap_resize = use_signal(|| true);
+    let snap_move = use_signal(|| true);
 
     use_hook(|| {
         use wasm_bindgen::closure::Closure;
@@ -438,6 +449,8 @@ pub fn use_workspace<K: PanelKind>(
         viewport,
         tiling_flow,
         loading,
+        snap_resize,
+        snap_move,
     }
 }
 
@@ -559,6 +572,7 @@ impl<K: PanelKind> Workspace<K> {
         if let Some(d) = *self.drag.read() {
             let c = e.client_coordinates();
             let tiling = self.effective_mode() == Mode::Tiling;
+            let snap = tiling && *self.snap_resize.read();
             let (vw, _) = *self.viewport.read();
             let column_flow = *self.tiling_flow.read() == TilingFlow::Column;
             let mut panels = self.panels;
@@ -567,7 +581,7 @@ impl<K: PanelKind> Workspace<K> {
                 &d,
                 c.x,
                 c.y,
-                tiling,
+                snap,
                 vw,
                 &Clamp::WEB,
                 &TileMetrics::WEB.with_column_flow(column_flow),
@@ -707,7 +721,7 @@ impl<K: PanelKind> Workspace<K> {
                                 style: "{style}",
                                 onmouseenter: move |_| {
                                     // Snap the dragged panel into this slot.
-                                    if tiling {
+                                    if tiling && *ws.snap_move.read() {
                                         if let Some(d) = *ws.tile_drag.read() {
                                             if d != kind {
                                                 ws.reorder_tile(d, kind);
@@ -769,7 +783,7 @@ impl<K: PanelKind> Workspace<K> {
                 onmousedown: move |e: MouseEvent| {
                     if draggable {
                         ws.begin_drag(idx, DragKind::Move, &e);
-                    } else if tiling && !*ws.is_mobile.read() {
+                    } else if tiling && !*ws.is_mobile.read() && *ws.snap_move.read() {
                         // Selection has to be suppressed at the source too:
                         // .ws-root.dragging only kicks in after this event.
                         e.prevent_default();
@@ -866,9 +880,35 @@ impl<K: PanelKind> Workspace<K> {
             .filter(|(_, p)| p.state == WinState::Minimized)
             .map(|(i, p)| (i, p.kind))
             .collect();
+        let sr = *self.snap_resize.read();
+        let sm = *self.snap_move.read();
+        let sr_cls = format!("snap-toggle {}", if sr { "on" } else { "off" });
+        let sm_cls = format!("snap-toggle {}", if sm { "on" } else { "off" });
+        let sr_label = if sr { "▣ resize" } else { "▢ resize" };
+        let sm_label = if sm { "▣ move" } else { "▢ move" };
         rsx! {
             footer { class: "dock",
                 span { class: "dock-label", "dock:" }
+                button {
+                    class: "{sr_cls}",
+                    title: "snap resize to grid",
+                    onclick: move |_| {
+                        let mut s = ws.snap_resize;
+                        let v = *s.read();
+                        s.set(!v);
+                    },
+                    "{sr_label}"
+                }
+                button {
+                    class: "{sm_cls}",
+                    title: "snap move to grid",
+                    onclick: move |_| {
+                        let mut s = ws.snap_move;
+                        let v = *s.read();
+                        s.set(!v);
+                    },
+                    "{sm_label}"
+                }
                 if minimized.is_empty() {
                     span { class: "dock-empty", "— nothing minimized —" }
                 }

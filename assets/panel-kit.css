@@ -141,7 +141,12 @@ button { font-family:var(--mono); }
 .dock-empty { color:var(--line2); font-size:.7rem; }
 .dock-chip { background:var(--bg); color:var(--fg); border:1px solid var(--line2);
   border-radius:3px; padding:.2rem .5rem; font-size:.72rem; cursor:pointer; white-space:nowrap; }
-.dock-chip:hover { border-color:var(--fg); }
+'.dock-chip:hover { border-color:var(--fg); }
+.snap-toggle { background:var(--bg); border:1px solid var(--line2);
+  border-radius:3px; padding:.15rem .4rem; font-size:.65rem; cursor:pointer;
+  white-space:nowrap; color:var(--dim); transition:color .1s, border-color .1s; }
+.snap-toggle.on { color:var(--accent); border-color:var(--accent); }
+.snap-toggle:hover { border-color:var(--fg); }
 
 /* Shared content states */
 .empty, .skeleton { display:grid; place-items:center; height:100%; color:var(--dim);

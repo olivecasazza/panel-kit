@@ -526,14 +526,15 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
 /// Apply the in-flight [`Drag`] for a pointer now at `(mx, my)`.
 ///
 /// `tiling` selects span-snapped resize (see [`begin_tile_resize`]); moves
-/// follow the pointer and floating resizes clamp to [`Clamp::min_w`]/
-/// [`Clamp::min_h`].
+/// follow the pointer. When `snap_resize` is true, resize deltas snap to
+/// tile spans; when false, resize is freeform pixel-perfect (clamped to
+/// [`Clamp::min_w`]/[`Clamp::min_h`]).
 pub fn apply_drag<K>(
     panels: &mut [PanelWin<K>],
     d: &Drag,
     mx: f64,
     my: f64,
-    tiling: bool,
+    snap_resize: bool,
     vw: f64,
     c: &Clamp,
     t: &TileMetrics,
@@ -546,7 +547,7 @@ pub fn apply_drag<K>(
             p.x = (d.start_x + (mx - d.start_mx)).max(0.0);
             p.y = (d.start_y + (my - d.start_my)).max(0.0);
         }
-        DragKind::Resize if tiling => {
+        DragKind::Resize if snap_resize => {
             if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
                 let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
                 if t.column_flow {
