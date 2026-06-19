@@ -533,6 +533,7 @@ pub fn apply_drag<K>(
     d: &Drag,
     mx: f64,
     my: f64,
+    tiling: bool,
     snap_resize: bool,
     snap_move: bool,
     grid: f64,
@@ -562,7 +563,7 @@ pub fn apply_drag<K>(
                 p.y = ny;
             }
         }
-        DragKind::Resize if snap_resize => {
+        DragKind::Resize if tiling && snap_resize => {
             if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
                 let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
                 if t.column_flow {
