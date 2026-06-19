@@ -895,6 +895,21 @@ impl<K: PanelKind> Workspace<K> {
         rsx! {
             footer { class: "dock",
                 span { class: "dock-label", "dock:" }
+                if minimized.is_empty() {
+                    span { class: "dock-empty", "— nothing minimized —" }
+                }
+                for (i, kind) in minimized.iter().copied() {
+                    button {
+                        key: "{i}",
+                        class: "dock-chip",
+                        onclick: move |_| {
+                            let mut panels = ws.panels;
+                            let z = front_z(&panels.read());
+                            if let Some(p) = panels.write().get_mut(i) { p.state = WinState::Floating; p.z = z; };
+                        },
+                        "{kind.title()}"
+                    }
+                }
                 button {
                     class: "{sr_cls}",
                     title: "snap resize to grid",
@@ -914,21 +929,6 @@ impl<K: PanelKind> Workspace<K> {
                         s.set(!v);
                     },
                     "{sm_label}"
-                }
-                if minimized.is_empty() {
-                    span { class: "dock-empty", "— nothing minimized —" }
-                }
-                for (i, kind) in minimized.iter().copied() {
-                    button {
-                        key: "{i}",
-                        class: "dock-chip",
-                        onclick: move |_| {
-                            let mut panels = ws.panels;
-                            let z = front_z(&panels.read());
-                            if let Some(p) = panels.write().get_mut(i) { p.state = WinState::Floating; p.z = z; };
-                        },
-                        "{kind.title()}"
-                    }
                 }
             }
         }
