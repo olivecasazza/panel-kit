@@ -572,7 +572,15 @@ impl<K: PanelKind> Workspace<K> {
         if let Some(d) = *self.drag.read() {
             let c = e.client_coordinates();
             let tiling = self.effective_mode() == Mode::Tiling;
-            let snap = tiling && *self.snap_resize.read();
+            let snap_resize_on = *self.snap_resize.read();
+            let snap_move_on = *self.snap_move.read();
+            // Tiling snap uses tile spans; floating snap uses a pixel grid.
+            let (snap_r, snap_m, grid) = if tiling {
+                (snap_resize_on, snap_move_on, 0.0)
+            } else {
+                let g = 16.0; // floating-mode grid size in CSS px
+                (snap_resize_on, snap_move_on, g)
+            };
             let (vw, _) = *self.viewport.read();
             let column_flow = *self.tiling_flow.read() == TilingFlow::Column;
             let mut panels = self.panels;
@@ -581,7 +589,9 @@ impl<K: PanelKind> Workspace<K> {
                 &d,
                 c.x,
                 c.y,
-                snap,
+                snap_r,
+                snap_m,
+                grid,
                 vw,
                 &Clamp::WEB,
                 &TileMetrics::WEB.with_column_flow(column_flow),

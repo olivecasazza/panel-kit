@@ -525,16 +525,17 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
 
 /// Apply the in-flight [`Drag`] for a pointer now at `(mx, my)`.
 ///
-/// `tiling` selects span-snapped resize (see [`begin_tile_resize`]); moves
-/// follow the pointer. When `snap_resize` is true, resize deltas snap to
-/// tile spans; when false, resize is freeform pixel-perfect (clamped to
-/// [`Clamp::min_w`]/[`Clamp::min_h`]).
+/// In tiling mode (`snap_resize` true), resize deltas snap to tile spans.
+/// In floating mode, `snap_resize`/`snap_move` quantize dimensions/position
+/// to `grid` px multiples; when both are false, everything is freeform.
 pub fn apply_drag<K>(
     panels: &mut [PanelWin<K>],
     d: &Drag,
     mx: f64,
     my: f64,
     snap_resize: bool,
+    snap_move: bool,
+    grid: f64,
     vw: f64,
     c: &Clamp,
     t: &TileMetrics,
@@ -542,10 +543,24 @@ pub fn apply_drag<K>(
     let Some(p) = panels.get_mut(d.idx) else {
         return;
     };
+    let g = |v: f64| -> f64 {
+        if grid > 0.0 {
+            (v / grid).round() * grid
+        } else {
+            v
+        }
+    };
     match d.kind {
         DragKind::Move => {
-            p.x = (d.start_x + (mx - d.start_mx)).max(0.0);
-            p.y = (d.start_y + (my - d.start_my)).max(0.0);
+            let nx = (d.start_x + (mx - d.start_mx)).max(0.0);
+            let ny = (d.start_y + (my - d.start_my)).max(0.0);
+            if snap_move {
+                p.x = g(nx);
+                p.y = g(ny);
+            } else {
+                p.x = nx;
+                p.y = ny;
+            }
         }
         DragKind::Resize if snap_resize => {
             if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
@@ -582,8 +597,15 @@ pub fn apply_drag<K>(
             }
         }
         DragKind::Resize => {
-            p.w = (d.start_w + (mx - d.start_mx)).max(c.min_w);
-            p.h = (d.start_h + (my - d.start_my)).max(c.min_h);
+            let nw = (d.start_w + (mx - d.start_mx)).max(c.min_w);
+            let nh = (d.start_h + (my - d.start_my)).max(c.min_h);
+            if snap_resize {
+                p.w = g(nw);
+                p.h = g(nh);
+            } else {
+                p.w = nw;
+                p.h = nh;
+            }
         }
     }
 }
