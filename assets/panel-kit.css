@@ -50,7 +50,7 @@ button { font-family:var(--mono); }
 /* Workspace area */
 .ws { position:relative; flex:1; min-height:0; overflow:hidden; }
 .ws.tiling { display:flex; flex-wrap:wrap; align-content:stretch; gap:8px; padding:8px; overflow:auto; }
-.ws.tiling.tiling-column { flex-flow:column wrap; }
+.ws.tiling.tiling-column { flex-flow:column wrap; overflow:hidden; }
 /* relative, not static: the .resize grip anchors to the tile. Inline
    basis/height from the snapped spans override the fallbacks here; apps can
    bump `--panel-grow` on individual panels to let them claim more row space.

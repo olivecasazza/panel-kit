@@ -563,10 +563,16 @@ pub fn apply_drag<K>(
                 p.y = ny;
             }
         }
-        DragKind::Resize if tiling && snap_resize => {
+        DragKind::Resize if tiling => {
             // Snap factor: round to nearest 5% tile-span increment so
             // resizing feels like discrete grid steps, not free-form.
-            let snap_pct = |v: f64| -> f64 { (v / 5.0).round() * 5.0 };
+            let snap_pct = |v: f64| -> f64 {
+                if snap_resize {
+                    (v / 5.0).round() * 5.0
+                } else {
+                    v
+                }
+            };
             if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
                 let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
                 if t.column_flow {
