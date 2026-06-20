@@ -564,6 +564,9 @@ pub fn apply_drag<K>(
             }
         }
         DragKind::Resize if tiling && snap_resize => {
+            // Snap factor: round to nearest 5% tile-span increment so
+            // resizing feels like discrete grid steps, not free-form.
+            let snap_pct = |v: f64| -> f64 { (v / 5.0).round() * 5.0 };
             if p.tile_basis_pct.is_some() || p.tile_grow.is_some() || p.tile_cross_pct.is_some() {
                 let col = ((vw - t.outer) / TILE_W_MAX as f64).max(t.col_floor);
                 if t.column_flow {
@@ -575,18 +578,21 @@ pub fn apply_drag<K>(
                         .start_cross_pct
                         .or(p.tile_cross_pct)
                         .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
-                    p.tile_basis_pct =
-                        Some((basis + ((my - d.start_my) / t.row) * 25.0).clamp(10.0, 100.0));
-                    p.tile_cross_pct =
-                        Some((cross + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0));
+                    p.tile_basis_pct = Some(snap_pct(
+                        (basis + ((my - d.start_my) / t.row) * 25.0).clamp(10.0, 100.0),
+                    ));
+                    p.tile_cross_pct = Some(snap_pct(
+                        (cross + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0),
+                    ));
                 } else {
                     let basis = d
                         .start_basis_pct
                         .or(p.tile_basis_pct)
                         .unwrap_or_else(|| p.tile_w as f64 * (100.0 / TILE_W_MAX as f64));
                     let grow = d.start_grow.or(p.tile_grow).unwrap_or(p.tile_h as f64);
-                    p.tile_basis_pct =
-                        Some((basis + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0));
+                    p.tile_basis_pct = Some(snap_pct(
+                        (basis + ((mx - d.start_mx) / col) * 25.0).clamp(10.0, 100.0),
+                    ));
                     p.tile_grow = Some((grow + (my - d.start_my) / t.row).max(0.25));
                 }
             } else {
