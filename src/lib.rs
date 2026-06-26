@@ -327,6 +327,8 @@ pub struct Workspace<K: PanelKind> {
     /// stay put and can only be resized, not rearranged. Defaults to true
     /// (snap), matching the original behavior.
     pub snap_move: Signal<bool>,
+    /// localStorage key for layout persistence; used by reset.
+    pub storage_key: &'static str,
 }
 
 impl<K: PanelKind> Clone for Workspace<K> {
@@ -451,6 +453,7 @@ pub fn use_workspace<K: PanelKind>(
         loading,
         snap_resize,
         snap_move,
+        storage_key,
     }
 }
 
@@ -956,6 +959,22 @@ impl<K: PanelKind> Workspace<K> {
                         s.set(!v);
                     },
                     "{sm_label}"
+                }
+                button {
+                    class: "snap-toggle",
+                    title: "reset layout to defaults",
+                    onclick: {
+                        let key = ws.storage_key;
+                        move |_| {
+                            if let Some(w) = web_sys::window() {
+                                if let Ok(Some(s)) = w.local_storage() {
+                                    let _ = s.remove_item(key);
+                                }
+                                let _ = w.location().reload();
+                            }
+                        }
+                    },
+                    "↻"
                 }
             }
         }
