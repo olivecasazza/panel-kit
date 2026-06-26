@@ -467,6 +467,26 @@ impl<K: PanelKind> Workspace<K> {
         }
     }
 
+    /// On mobile, if all panels are minimized, restore the first one (dock is
+    /// hidden so user can't un-minimize). Call from render() or the app root.
+    fn auto_restore_if_all_minimized(&self) {
+        if !*self.is_mobile.read() {
+            return;
+        }
+        let dominated = self
+            .panels
+            .read()
+            .iter()
+            .all(|p| p.state == WinState::Minimized);
+        if dominated {
+            let mut panels = self.panels;
+            let mut ps = panels.write();
+            if let Some(p) = ps.first_mut() {
+                p.state = WinState::Floating;
+            }
+        }
+    }
+
     /// Class for the app root div: `"ws-root"`, `"ws-root mobile"` below
     /// the mobile breakpoint, or `"ws-root dragging"` while a move/resize/
     /// reorder drag is in flight (suppresses text selection under the
@@ -640,6 +660,8 @@ impl<K: PanelKind> Workspace<K> {
         flow: TilingFlow,
         body: impl Fn(K, bool) -> Element,
     ) -> Element {
+        self.auto_restore_if_all_minimized();
+
         let mut tiling_flow = self.tiling_flow;
         tiling_flow.set(flow);
 
@@ -877,6 +899,10 @@ impl<K: PanelKind> Workspace<K> {
     /// The footer dock: minimized panels collapse to chips; click restores
     /// (and raises) the panel. Render it once after
     /// [`render`](Workspace::render) in the app root.
+    ///
+    /// Hidden on mobile (CSS `display:none`) — the dock metaphor doesn't fit
+    /// a phone; minimized panels auto-restore on next render if the only
+    /// remaining UI is the dock.
     pub fn dock(&self) -> Element {
         let ws = *self;
         let minimized: Vec<(usize, K)> = self

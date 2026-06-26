@@ -167,16 +167,36 @@ button { font-family:var(--mono); }
   border:1px solid var(--line2); border-radius:5px; padding:.5rem .6rem;
   box-shadow:0 10px 30px #000c; }
 
-/* Mobile shell — same panels, static single-column stack (forced tiling) */
+/* ─── Responsive shell ─── */
+/* ponytail: single breakpoint at 760px; add tablet (1024px) when needed */
+
+/* Mobile (<760px): single-column stack, no window management */
 .mobile .topbar { height:auto; flex-wrap:wrap; padding:.4rem .6rem; gap:.5rem; }
 .mobile .topbar h1 { font-size:.9rem; }
-.mobile .ws.tiling { padding:6px; gap:6px; }
-.mobile .ws.tiling .panel { flex:1 1 100%; min-width:0; height:auto;
-  min-height:200px; max-height:78vh; }
-.mobile .lights { display:none; }                 /* no window-management on mobile */
-.mobile .panel-head { cursor:default; }
+.mobile .ws.tiling { padding:6px; gap:6px; overflow-y:auto; }
+.mobile .ws.tiling .panel {
+  flex:0 0 auto; min-width:0; width:100%;
+  /* ponytail: auto height, content-driven, scroll inside panel-body */
+  min-height:180px; max-height:none; height:auto;
+}
+.mobile .panel-body { max-height:70vh; overflow:auto; }
+.mobile .lights { display:none; }
+.mobile .panel-head { cursor:default; touch-action:manipulation; }
 .mobile .resize { display:none; }
-.mobile .dock { min-height:30px; }
+.mobile .dock { display:none; }  /* ponytail: hide dock on mobile, restore if needed */
+
+/* Touch targets: 44px minimum per Apple/Google HIG */
+@media (pointer:coarse) {
+  .light { width:28px; height:28px; }
+  .dock-chip { padding:.4rem .7rem; font-size:.8rem; }
+  .panel-head { min-height:32px; }
+}
+
+/* CSS fallback if JS hasn't set .mobile yet (FOUC guard) */
+@media (max-width:759px) {
+  .ws-root:not(.mobile) .ws.tiling .panel { flex:0 0 auto; width:100%; }
+  .ws-root:not(.mobile) .lights { opacity:0; pointer-events:none; }
+}
 
 /* === badge component === */
 /* Port of the egui badge palette onto the theme variables:

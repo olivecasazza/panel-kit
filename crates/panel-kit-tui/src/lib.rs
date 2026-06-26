@@ -569,6 +569,9 @@ impl<K: PanelKind> TuiWorkspace<K> {
                         mx,
                         my,
                         tiling,
+                        true, // snap_resize
+                        true, // snap_move
+                        0.0,  // grid
                         vw,
                         &Clamp::CELLS,
                         &TileMetrics::CELLS,
