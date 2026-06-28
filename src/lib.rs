@@ -87,6 +87,12 @@
 
 pub mod badge;
 
+pub mod grafana;
+pub use grafana::GrafanaPanel;
+
+pub mod ide;
+pub use ide::IdePanel;
+
 #[cfg(feature = "bevy")]
 pub mod bevy;
 #[cfg(feature = "bevy")]
