@@ -659,6 +659,26 @@ impl<K: PanelKind> Workspace<K> {
         self.render_with_tiling_flow(TilingFlow::Row, body)
     }
 
+    /// Like [`render`](Workspace::render), but panels for which `keep_mounted`
+    /// returns `true` are *never* dropped from the DOM — when they would
+    /// normally be skipped (minimized, or hidden behind a maximized sibling)
+    /// they are still rendered, keyed by their stable slug, with `display:none`
+    /// applied. Their chrome (header/resize) is suppressed while hidden.
+    ///
+    /// This exists for panels whose body owns imperative, non-reconstructible
+    /// DOM state — e.g. a `<canvas>` driving a running wasm/WebGL render loop.
+    /// Dropping such a panel from the DOM would unmount the canvas and reboot
+    /// the loop; `display:none` preserves the element (the render loop merely
+    /// pauses via `requestAnimationFrame` and resumes on restore). Panels not
+    /// selected by `keep_mounted` behave exactly as in [`render`].
+    pub fn render_keepalive(
+        &self,
+        keep_mounted: impl Fn(K) -> bool,
+        body: impl Fn(K, bool) -> Element,
+    ) -> Element {
+        self.render_inner(TilingFlow::Row, Some(&keep_mounted), body)
+    }
+
     /// Render the workspace with a specific flex direction for tiling mode.
     ///
     /// Floating and maximized modes are unchanged. In tiling mode, `Row`
@@ -667,6 +687,18 @@ impl<K: PanelKind> Workspace<K> {
     pub fn render_with_tiling_flow(
         &self,
         flow: TilingFlow,
+        body: impl Fn(K, bool) -> Element,
+    ) -> Element {
+        self.render_inner(flow, None::<&dyn Fn(K) -> bool>, body)
+    }
+
+    /// Shared render core. `keep_mounted`, when supplied, forces the selected
+    /// panels to render (hidden via `display:none`) even when they'd normally
+    /// be skipped — see [`render_keepalive`](Workspace::render_keepalive).
+    fn render_inner(
+        &self,
+        flow: TilingFlow,
+        keep_mounted: Option<&dyn Fn(K) -> bool>,
         body: impl Fn(K, bool) -> Element,
     ) -> Element {
         self.auto_restore_if_all_minimized();
@@ -678,7 +710,9 @@ impl<K: PanelKind> Workspace<K> {
         let mode_now = self.effective_mode();
         let ps = self.panels.read().clone();
         let maximized = ps.iter().position(|p| p.state == WinState::Maximized);
-        let visible: Vec<usize> = match maximized {
+        // Panels that render normally (own their layout slot). A kept-alive
+        // panel that isn't in this set is still rendered, but hidden.
+        let shown: Vec<usize> = match maximized {
             Some(mi) => vec![mi],
             None => ps
                 .iter()
@@ -687,6 +721,18 @@ impl<K: PanelKind> Workspace<K> {
                 .map(|(i, _)| i)
                 .collect(),
         };
+        // Full render set: shown panels plus any kept-alive panel not already
+        // shown (those get `display:none`). Preserves Vec order so keys stay
+        // stable and the canvas element is never remounted.
+        let visible: Vec<usize> = ps
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| {
+                shown.contains(i) || keep_mounted.map(|k| k(p.kind)).unwrap_or(false)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let is_shown = |i: usize| shown.contains(&i);
         let ws_class = if maximized.is_some() {
             "ws maxed"
         } else if mode_now == Mode::Tiling {
@@ -699,7 +745,7 @@ impl<K: PanelKind> Workspace<K> {
         };
         let ws_style =
             if maximized.is_none() && mode_now == Mode::Tiling && flow == TilingFlow::Column {
-                let cols = tiling_column_count(&ps, &visible);
+                let cols = tiling_column_count(&ps, &shown);
                 let gaps = cols.saturating_sub(1) * 8;
                 format!("--tile-column-width: calc((100% - {gaps}px) / {cols});")
             } else {
@@ -712,10 +758,19 @@ impl<K: PanelKind> Workspace<K> {
                 for i in visible.iter().copied() {
                     {
                         let p = ps[i];
-                        let floating = maximized.is_none() && mode_now == Mode::Floating;
-                        let tiling = maximized.is_none() && mode_now == Mode::Tiling;
+                        // Kept-alive but not in a real layout slot this frame:
+                        // render hidden so the canvas element survives.
+                        let hidden = !is_shown(i);
+                        let floating = !hidden && maximized.is_none() && mode_now == Mode::Floating;
+                        let tiling = !hidden && maximized.is_none() && mode_now == Mode::Tiling;
                         let kind = p.kind;
-                        let style = if maximized.is_some() {
+                        let style = if hidden {
+                            // Kept-alive but off-layout: keep the element (and
+                            // any canvas it hosts) in the DOM, out of flow and
+                            // invisible. `display:none` pauses a canvas's rAF
+                            // loop without destroying it; it resumes on show.
+                            "display:none;".to_string()
+                        } else if maximized.is_some() {
                             "position:absolute; inset:0;".to_string()
                         } else if floating {
                             // Project through the viewport clamp at render
