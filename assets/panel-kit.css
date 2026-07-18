@@ -130,9 +130,12 @@ button { font-family:var(--mono); }
 .light.yellow { --light-c: var(--yellow); }
 .light.max { --light-c: var(--pink); }
 
-/* Resize handle */
+/* Resize handle. z-index:3 keeps the grip grabbable above an embedded
+   BevyCanvas, whose layers occupy z-index 0/1/2 (background/canvas/overlay,
+   see bevy.rs BEVY_CSS) — without it the canvas paints over the grip and the
+   initial mousedown never reaches it, so resize never starts. */
 .resize { position:absolute; right:0; bottom:0; width:14px; height:14px; cursor:nwse-resize;
-  background:linear-gradient(135deg, transparent 50%, var(--line2) 50%); }
+  z-index:3; background:linear-gradient(135deg, transparent 50%, var(--line2) 50%); }
 
 /* Dock footer */
 .dock { display:flex; align-items:center; gap:.5rem; height:30px; flex:0 0 30px;
