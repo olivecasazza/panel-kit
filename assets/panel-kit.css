@@ -49,7 +49,14 @@ button { font-family:var(--mono); }
 
 /* Workspace area */
 .ws { position:relative; flex:1; min-height:0; overflow:hidden; }
-.ws.tiling { display:flex; flex-wrap:wrap; align-content:stretch; gap:8px; padding:8px; overflow:auto; }
+/* Panels size to their CONTENT by default: `align-items:flex-start` stops each
+   panel stretching to its line, `align-content:flex-start` packs the lines to
+   the top so freed height collapses upward instead of leaving a void. Panels
+   that must fill (a canvas, a board, anything sized by percentage) opt back in
+   with `.panel-fill` — or, since every panel also carries a `.panel-<slug>`
+   class, straight from the app's own CSS. */
+.ws.tiling { display:flex; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; gap:8px; padding:8px; overflow:auto; }
+.ws.tiling .panel.panel-fill { align-self:stretch; }
 .ws.tiling.tiling-column { flex-flow:column wrap; overflow:hidden; }
 /* relative, not static: the .resize grip anchors to the tile. Inline
    basis/height from the snapped spans override the fallbacks here; apps can
