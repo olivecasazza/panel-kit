@@ -88,7 +88,7 @@
 pub mod badge;
 
 pub mod grafana;
-pub use grafana::GrafanaPanel;
+pub use grafana::{GrafanaDashboard, GrafanaPanel};
 
 pub mod ide;
 pub use ide::IdePanel;
