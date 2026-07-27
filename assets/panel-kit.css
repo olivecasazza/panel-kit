@@ -257,10 +257,25 @@ button { font-family:var(--mono); }
 
 /* === grafana embed panel === */
 /* Fills its host panel; the iframe carries Grafana's own chrome (or none, in
-   d-solo / kiosk). The dark backdrop avoids a white flash before load. */
+   d-solo / kiosk). The backdrop avoids a white flash before load — the iframe
+   itself stays transparent so it shows through until Grafana paints. Grafana
+   is cross-origin, so this frame is the ONLY styling we control. */
 .grafana-panel { width:100%; height:100%; min-height:120px; position:relative;
   background:var(--bg); overflow:hidden; }
-.grafana-frame { width:100%; height:100%; border:0; display:block; background:var(--bg); }
+.grafana-frame { width:100%; height:100%; border:0; display:block;
+  background:transparent; color-scheme:normal; }
+/* Covers the load; sits under .grafana-open so the escape hatch stays clickable. */
+.grafana-loading { position:absolute; inset:0; z-index:1; display:flex;
+  align-items:center; justify-content:center; background:var(--bg);
+  pointer-events:none; }
+/* Always present: a blocked frame (X-Frame-Options) is undetectable from JS,
+   so the way out is a link, not an error state. Fades in on hover. */
+.grafana-open { position:absolute; top:.25rem; right:.3rem; z-index:2;
+  font-family:var(--mono); font-size:.62rem; line-height:1; text-decoration:none;
+  color:var(--dim); background:var(--panel); border:1px solid var(--line);
+  border-radius:3px; padding:.15rem .3rem; opacity:.35; transition:opacity .15s; }
+.grafana-panel:hover .grafana-open, .grafana-open:focus-visible { opacity:1; }
+.grafana-open:hover { color:var(--accent); border-color:var(--accent); }
 
 /* === ide / code-manifest editor === */
 .ide-panel { display:flex; flex-direction:column; width:100%; height:100%;
