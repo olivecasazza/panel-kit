@@ -163,7 +163,10 @@ fn GrafanaFrame(src: String, open_url: String, title: String) -> Element {
                 // Grafana panels are interactive (zoom, tooltips); allow the
                 // frame to drive its own scroll/fullscreen.
                 allow: "fullscreen",
-                "loading": "lazy",
+                // Deliberately NOT loading="lazy": a panel that is minimized,
+                // docked, or scrolled out of the workspace never fetches, so
+                // re-scoping it leaves the spinner up with no load event ever
+                // coming. Eager costs one request the user asked for anyway.
                 onload: move |_| loaded.set(true),
             }
             if !loaded() {
