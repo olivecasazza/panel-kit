@@ -727,9 +727,7 @@ impl<K: PanelKind> Workspace<K> {
         let visible: Vec<usize> = ps
             .iter()
             .enumerate()
-            .filter(|(i, p)| {
-                shown.contains(i) || keep_mounted.map(|k| k(p.kind)).unwrap_or(false)
-            })
+            .filter(|(i, p)| shown.contains(i) || keep_mounted.map(|k| k(p.kind)).unwrap_or(false))
             .map(|(i, _)| i)
             .collect();
         let is_shown = |i: usize| shown.contains(&i);
