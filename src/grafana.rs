@@ -324,6 +324,9 @@ mod tests {
     }
 
     /// Mirrors what `GrafanaPanel` builds, so the tests cover the real shape.
+    // Mirrors the component's props one-for-one; grouping them here would stop
+    // it mirroring.
+    #[allow(clippy::too_many_arguments)]
     fn solo_url(
         base: &str,
         uid: &str,

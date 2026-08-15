@@ -415,7 +415,7 @@ pub fn use_workspace<K: PanelKind>(
         // native-window resize. The plain window listener stays as a
         // belt-and-suspenders for ordinary browser tabs.
         let obs_cb = Closure::wrap(Box::new({
-            let mut recompute = recompute.clone();
+            let mut recompute = recompute;
             move || recompute()
         }) as Box<dyn FnMut()>);
         if let Some(el) = web_sys::window()
@@ -563,7 +563,7 @@ impl<K: PanelKind> Workspace<K> {
         let (vw, vh) = *self.viewport.read();
         let mut panels = self.panels;
         let d = core_begin_drag(
-            &mut *panels.write(),
+            &mut panels.write(),
             idx,
             kind,
             c.x,
@@ -587,7 +587,7 @@ impl<K: PanelKind> Workspace<K> {
     /// on the effective mode.
     pub fn begin_tile_resize(&self, idx: usize, e: &MouseEvent) {
         let c = e.client_coordinates();
-        let d = core_begin_tile_resize(&*self.panels.read(), idx, c.x, c.y);
+        let d = core_begin_tile_resize(&self.panels.read(), idx, c.x, c.y);
         if d.is_some() {
             let mut drag = self.drag;
             drag.set(d);
@@ -610,7 +610,7 @@ impl<K: PanelKind> Workspace<K> {
             let column_flow = *self.tiling_flow.read() == TilingFlow::Column;
             let mut panels = self.panels;
             apply_drag(
-                &mut *panels.write(),
+                &mut panels.write(),
                 &d,
                 c.x,
                 c.y,
@@ -787,7 +787,7 @@ impl<K: PanelKind> Workspace<K> {
                             let min_w = p.tile_min_w.unwrap_or(300.0);
                             let min_h = p
                                 .tile_min_h
-                                .unwrap_or_else(|| p.tile_h as f64 * TILE_ROW_PX * 0.5);
+                                .unwrap_or(p.tile_h as f64 * TILE_ROW_PX * 0.5);
                             let cross = match (flow, p.tile_cross_pct) {
                                 (TilingFlow::Column, Some(cross_pct)) => {
                                     format!(" --panel-cross-size: calc({cross_pct}% - 8px);")
@@ -918,9 +918,7 @@ impl<K: PanelKind> Workspace<K> {
         let label = loading.label.clone();
         let detail = loading.detail.clone();
         let pct = loading.fraction().map(|f| (f * 100.0).round());
-        let fill_style = pct
-            .map(|pct| format!("width:{pct}%;"))
-            .unwrap_or_else(|| "".to_string());
+        let fill_style = pct.map(|pct| format!("width:{pct}%;")).unwrap_or_default();
         rsx! {
             div { class: "panel-loading", role: "status", "aria-live": "polite",
                 div { class: "panel-loading-card",
@@ -955,7 +953,7 @@ impl<K: PanelKind> Workspace<K> {
     /// ```
     pub fn restore(&self, kind: K) {
         let mut panels = self.panels;
-        panel_kit_core::restore(&mut *panels.write(), kind);
+        panel_kit_core::restore(&mut panels.write(), kind);
     }
 
     /// The footer dock: minimized panels collapse to chips; click restores
