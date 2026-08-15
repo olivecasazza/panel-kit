@@ -473,6 +473,10 @@ pub fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64, c: &Clamp) -> (f64, 
 /// ([`effective_rect`]), which can differ from the stored geometry after a
 /// viewport shrink. Writing it back on grab keeps the drag math anchored to
 /// what's visible — no jump on the first pointer-move.
+// Positional args, deliberately: this is the renderer-facing seam that shells
+// call from a pointer-down handler. Bundling them into a params struct would
+// churn every consumer's call site for no behavioral gain.
+#[allow(clippy::too_many_arguments)]
 pub fn begin_drag<K>(
     panels: &mut [PanelWin<K>],
     idx: usize,
@@ -528,6 +532,8 @@ pub fn begin_tile_resize<K>(panels: &[PanelWin<K>], idx: usize, mx: f64, my: f64
 /// In tiling mode (`snap_resize` true), resize deltas snap to tile spans.
 /// In floating mode, `snap_resize`/`snap_move` quantize dimensions/position
 /// to `grid` px multiples; when both are false, everything is freeform.
+// See begin_drag: the pointer-move seam takes the same positional shape.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_drag<K>(
     panels: &mut [PanelWin<K>],
     d: &Drag,
