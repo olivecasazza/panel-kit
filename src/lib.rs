@@ -670,7 +670,7 @@ impl<K: PanelKind> Workspace<K> {
     /// Dropping such a panel from the DOM would unmount the canvas and reboot
     /// the loop; `display:none` preserves the element (the render loop merely
     /// pauses via `requestAnimationFrame` and resumes on restore). Panels not
-    /// selected by `keep_mounted` behave exactly as in [`render`].
+    /// selected by `keep_mounted` behave exactly as in [`render`](Workspace::render).
     pub fn render_keepalive(
         &self,
         keep_mounted: impl Fn(K) -> bool,
