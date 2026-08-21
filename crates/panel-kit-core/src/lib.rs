@@ -23,6 +23,7 @@
 #![warn(missing_docs)]
 
 pub mod badge;
+pub mod dropdown;
 
 use serde::{Deserialize, Serialize};
 

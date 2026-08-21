@@ -87,6 +87,9 @@
 
 pub mod badge;
 
+pub mod dropdown;
+pub use dropdown::Dropdown;
+
 pub mod grafana;
 pub use grafana::{GrafanaDashboard, GrafanaPanel};
 
