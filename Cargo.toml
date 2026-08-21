@@ -28,6 +28,7 @@ panel-kit-core = { version = "0.2.0", path = "crates/panel-kit-core" }
 dioxus = { version = "0.6", features = ["web"] }
 serde = { version = "1", features = ["derive"] }
 gloo-storage = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 # Deliberately loose: consuming apps pin the exact wasm-bindgen their
 # toolchain ships (e.g. =0.2.118 to match nixpkgs' wasm-bindgen-cli).
 wasm-bindgen = "0.2"

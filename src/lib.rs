@@ -87,6 +87,8 @@
 
 pub mod badge;
 
+pub mod cascade;
+pub use cascade::CascadingDropdown;
 pub mod dropdown;
 pub use dropdown::Dropdown;
 
