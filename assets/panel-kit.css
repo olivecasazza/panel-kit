@@ -337,7 +337,10 @@ button { font-family:var(--mono); }
 .pk-dropdown-search:focus { box-shadow:inset 0 -1px 0 var(--accent); }
 .pk-dropdown-list { max-height:50vh; overflow-y:auto; padding:.25rem 0; }
 .pk-dropdown-group-label { padding:.3rem .55rem .15rem; font-size:10px;
-  letter-spacing:.04em; opacity:.55; text-transform:none;
+  letter-spacing:.04em; text-transform:none;
+  /* dim via text color only: opacity would fade the solid background too,
+     letting scrolled items bleed through the sticky header */
+  color:color-mix(in srgb, var(--fg) 55%, transparent);
   position:sticky; top:0; background:var(--bg); }
 .pk-dropdown-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -346,3 +349,23 @@ button { font-family:var(--mono); }
   box-shadow:inset 2px 0 0 var(--accent); }
 .pk-dropdown-item.selected { color:var(--accent); }
 .pk-dropdown-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
+
+/* Miller-columns cascade (panel-kit-core::cascade). Reuses dropdown theme
+   variables; columns are laid out side by side under the button. */
+.pk-cascade { position:relative; display:inline-block; min-width:0; }
+.pk-cascade-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
+  display:flex; background:var(--bg); border:1px solid var(--border,#2a2a2a);
+  border-radius:6px; outline:none; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  max-width:min(80vw, 720px); }
+.pk-cascade-col { min-width:9rem; max-width:16rem; max-height:50vh;
+  overflow-y:auto; padding:.25rem 0; }
+.pk-cascade-col + .pk-cascade-col { border-left:1px solid var(--border,#2a2a2a); }
+.pk-cascade-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+.pk-cascade-item:hover { background:var(--surface-2,#161616); }
+.pk-cascade-item.highlighted { background:var(--surface-2,#161616);
+  box-shadow:inset 2px 0 0 var(--accent); }
+.pk-cascade-item.selected { color:var(--accent); }
+.pk-cascade-item .pk-cascade-chevron { opacity:.5; }
+.pk-cascade-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
