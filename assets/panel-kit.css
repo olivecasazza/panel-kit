@@ -321,12 +321,19 @@ button { font-family:var(--mono); }
    absolutely positioned under the button and scrolls for long lists. */
 .pk-dropdown { position:relative; display:inline-block; min-width:0; }
 .pk-dropdown-btn { display:flex; align-items:center; gap:.5rem; width:100%;
-  background:var(--bg); color:var(--fg); border:1px solid var(--border,#2a2a2a);
-  border-radius:6px; padding:.3rem .55rem; font-family:var(--mono);
-  font-size:12px; cursor:pointer; text-align:left; }
-.pk-dropdown-btn:hover { border-color:var(--accent); }
+  background:color-mix(in srgb, var(--fg) 7%, var(--bg)); color:var(--fg);
+  border:1px solid var(--line2); border-radius:6px; padding:.3rem .55rem;
+  font-family:var(--mono); font-size:12px; cursor:pointer; text-align:left;
+  transition:border-color .12s, background .12s; }
+.pk-dropdown-btn:hover, .pk-dropdown-btn:focus-visible {
+  border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.pk-dropdown-open > .pk-dropdown-btn {
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent); }
 .pk-dropdown-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pk-dropdown-caret { opacity:.6; }
+.pk-dropdown-caret { opacity:.6; transition:transform .12s; }
+.pk-dropdown-open > .pk-dropdown-btn .pk-dropdown-caret {
+  transform:rotate(180deg); opacity:1; color:var(--accent); }
 .pk-dropdown-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
   min-width:100%; max-width:min(70vw, 480px); background:var(--bg);
   border:1px solid var(--border,#2a2a2a); border-radius:6px; outline:none;

@@ -72,8 +72,10 @@ pub fn Dropdown(
     let visible = filter_items(&items, &st.query);
     let groups = group_items(&visible);
 
+    let root_class = if st.open { "pk-dropdown pk-dropdown-open" } else { "pk-dropdown" };
+
     rsx! {
-        div { class: "pk-dropdown",
+        div { class: "{root_class}",
             button {
                 class: "pk-dropdown-btn",
                 r#type: "button",

@@ -81,8 +81,10 @@ pub fn CascadingDropdown(
     let cols = panel_kit_core::cascade::columns(&items, &path);
     let items_for_keys = items.clone();
 
+    let root_class = if open { "pk-dropdown pk-cascade pk-dropdown-open" } else { "pk-dropdown pk-cascade" };
+
     rsx! {
-        div { class: "pk-dropdown pk-cascade",
+        div { class: "{root_class}",
             button {
                 class: "pk-dropdown-btn",
                 r#type: "button",
