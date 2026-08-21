@@ -156,6 +156,7 @@ pub fn Dropdown(
                                         let hl = st.highlighted == Some(idx);
                                         let sel = item.value == selected;
                                         let value = item.value.clone();
+                                        let key = item.value.clone();
                                         let label = item.label.clone();
                                         let item_class = if hl {
                                             "pk-dropdown-item highlighted"
@@ -166,7 +167,7 @@ pub fn Dropdown(
                                         };
                                         rsx! {
                                             div {
-                                                key: "{value}",
+                                                key: "{key}",
                                                 class: "{item_class}",
                                                 role: "option",
                                                 aria_selected: "{sel}",
