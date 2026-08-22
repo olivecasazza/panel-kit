@@ -86,7 +86,7 @@ pub fn Dropdown(
                     state.set(if now_open { DropdownState::open() } else { DropdownState::default() });
                     on_action.call(DropdownAction::OpenChanged { open: now_open });
                 },
-                span { class: "pk-dropdown-label", "{current_label}" }
+                span { class: "pk-dropdown-label", title: "{current_label}", "{current_label}" }
                 span { class: "pk-dropdown-caret", "▾" }
             }
             if st.open {

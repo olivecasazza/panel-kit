@@ -95,7 +95,7 @@ pub fn CascadingDropdown(
                     state.set(if now_open { CascadeState::open() } else { CascadeState::default() });
                     on_action.call(CascadeAction::OpenChanged { open: now_open });
                 },
-                span { class: "pk-dropdown-label", "{button_label}" }
+                span { class: "pk-dropdown-label", title: "{button_label}", "{button_label}" }
                 span { class: "pk-dropdown-caret", "▾" }
             }
             if open {
@@ -179,6 +179,7 @@ pub fn CascadingDropdown(
                                             class: "{class}",
                                             role: "option",
                                             aria_selected: "{hl}",
+                                            title: "{label}",
                                             onclick: move |_| {
                                                 if entry.has_children {
                                                     // Descend from THIS column's depth so clicking

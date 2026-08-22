@@ -92,6 +92,9 @@ pub use cascade::CascadingDropdown;
 pub mod dropdown;
 pub use dropdown::Dropdown;
 
+pub mod table;
+pub use table::Table;
+
 pub mod grafana;
 pub use grafana::{GrafanaDashboard, GrafanaPanel};
 
