@@ -358,8 +358,13 @@ button { font-family:var(--mono); }
 .pk-dropdown-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
 
 /* Miller-columns cascade (panel-kit-core::cascade). Reuses dropdown theme
-   variables; columns are laid out side by side under the button. */
-.pk-cascade { position:relative; display:inline-block; min-width:0; }
+   variables; columns are laid out side by side under the button. The root
+   shrink-wraps the button to the breadcrumb text (max-content) instead of
+   stretching to the container — the cascade's breadcrumb ("robot / campaign /
+   experiment") is read as a label, not a form field. max-width:100% keeps it
+   inside narrow hosts, where the label falls back to ellipsis. */
+.pk-cascade { position:relative; display:inline-block; min-width:0;
+  width:max-content; max-width:100%; }
 .pk-cascade-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
   display:flex; background:var(--bg); border:1px solid var(--border,#2a2a2a);
   border-radius:6px; outline:none; box-shadow:0 8px 24px rgba(0,0,0,.5);

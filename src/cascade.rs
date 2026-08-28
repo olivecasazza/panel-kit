@@ -59,6 +59,10 @@ pub fn CascadingDropdown(
     /// Button text when nothing is selected.
     #[props(default = "select…".to_string())]
     placeholder: String,
+    /// Show `path / label` in the closed button (default) or just the leaf.
+    /// Hosts in narrow panels set false — the full path stays in the tooltip.
+    #[props(default = true)]
+    show_breadcrumb: bool,
     /// Receives every [`CascadeAction`] the widget produces.
     on_action: EventHandler<CascadeAction>,
 ) -> Element {
@@ -66,12 +70,13 @@ pub fn CascadingDropdown(
 
     let button_label = if selected_label.is_empty() {
         placeholder.clone()
-    } else {
+    } else if show_breadcrumb {
         let mut crumbs = selected_path.clone();
         crumbs.push(selected_label.clone());
         crumbs.join(" / ")
+    } else {
+        selected_label.clone()
     };
-
     // Hoist everything rsx closures need into plain locals (the signal state
     // is not Copy, and move closures can't share captured Vecs).
     let open = st.open;
