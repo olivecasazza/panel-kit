@@ -66,9 +66,7 @@ pub fn filter_items(items: &[DropdownItem], query: &str) -> Vec<DropdownItem> {
     }
     items
         .iter()
-        .filter(|i| {
-            i.label.to_lowercase().contains(&q) || i.value.to_lowercase().contains(&q)
-        })
+        .filter(|i| i.label.to_lowercase().contains(&q) || i.value.to_lowercase().contains(&q))
         .cloned()
         .collect()
 }

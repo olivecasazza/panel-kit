@@ -381,6 +381,12 @@ pub struct Clamp {
     pub min_w: f64,
     /// Minimum panel height.
     pub min_h: f64,
+    /// Ceiling on a floating panel's size as a fraction of the workspace
+    /// (0..=1 per axis). A panel dragged, restored, or defaulted larger is
+    /// projected down at render time like every other clamp — the stored
+    /// geometry survives, so shrinking is never one-way. Maximize bypasses
+    /// this deliberately: it is the explicit "fill the screen" gesture.
+    pub max_frac: f64,
 }
 
 impl Clamp {
@@ -394,6 +400,7 @@ impl Clamp {
         edge: 6.0,
         min_w: 180.0,
         min_h: 110.0,
+        max_frac: 0.75,
     };
 
     /// Character-cell defaults for terminal shells.
@@ -406,6 +413,7 @@ impl Clamp {
         edge: 0.0,
         min_w: 20.0,
         min_h: 5.0,
+        max_frac: 0.75,
     };
 }
 
@@ -461,8 +469,8 @@ pub fn front_z<K>(ps: &[PanelWin<K>]) -> i32 {
 pub fn effective_rect<K>(p: &PanelWin<K>, vw: f64, vh: f64, c: &Clamp) -> (f64, f64, f64, f64) {
     let ws_w = (vw - c.outer_w).max(c.floor_w);
     let ws_h = (vh - c.outer_h).max(c.floor_h);
-    let w = p.w.min(ws_w - c.inner).max(c.min_w);
-    let h = p.h.min(ws_h - c.inner).max(c.min_h);
+    let w = p.w.min(ws_w - c.inner).min(ws_w * c.max_frac).max(c.min_w);
+    let h = p.h.min(ws_h - c.inner).min(ws_h * c.max_frac).max(c.min_h);
     let x = p.x.min(ws_w - w - c.edge).max(0.0);
     let y = p.y.min(ws_h - h - c.edge).max(0.0);
     (x, y, w, h)
@@ -722,4 +730,34 @@ pub fn kind_slug(title: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod clamp_tests {
+    use super::*;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    enum K {
+        A,
+    }
+    impl PanelKind for K {
+        fn title(self) -> &'static str {
+            "a"
+        }
+    }
+
+    #[test]
+    fn effective_rect_caps_at_max_frac() {
+        let mut lb = LayoutBuilder::new();
+        // 1000x1000 viewport, WEB chrome: workspace 996x934. The panel wants
+        // 5000px; the cap is 75% of the workspace per axis.
+        let p = lb.at(K::A, 0.0, 0.0, 5000.0, 5000.0);
+        let (_, _, w, h) = effective_rect(&p, 1000.0, 1000.0, &Clamp::WEB);
+        assert!(w <= 996.0 * 0.75 + 1e-9, "w={w}");
+        assert!(h <= 934.0 * 0.75 + 1e-9, "h={h}");
+        // Small panels are untouched.
+        let p2 = lb.at(K::A, 10.0, 10.0, 300.0, 200.0);
+        let (_, _, w2, h2) = effective_rect(&p2, 1000.0, 1000.0, &Clamp::WEB);
+        assert_eq!((w2, h2), (300.0, 200.0));
+    }
 }
