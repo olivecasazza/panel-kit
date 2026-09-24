@@ -412,3 +412,86 @@ fn native_width_from_core_column(width: ColumnWidth) -> Constraint {
         ColumnWidth::Flex { weight } => Constraint::Fill(weight),
     }
 }
+
+#[test]
+fn flame_chart_safely_handles_buffer_overflow_boundaries() {
+    let metrics = workspace_canary::Metrics::new();
+    let spans = metrics.flame();
+    let theme = ResolvedTuiTheme::default();
+
+    // Reproduce the exact boundary from the panic: buffer is 95x15, area exceeds or touches boundary
+    for (buf_w, buf_h) in [(95, 15), (40, 5), (80, 24)] {
+        for (area_y, area_h) in [(0, 15), (2, 15), (10, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(buf_w, buf_h)).unwrap();
+            terminal.draw(|f| {
+                charts::flame(f, Rect::new(0, area_y, buf_w, area_h), &theme, &spans);
+            }).expect("flame chart must not panic when area exceeds frame buffer");
+        }
+    }
+}
+
+#[test]
+fn boxplot_chart_safely_handles_buffer_overflow_boundaries() {
+    let metrics = workspace_canary::Metrics::new();
+    let boxes = metrics.boxes();
+    let theme = ResolvedTuiTheme::default();
+
+    for (buf_w, buf_h) in [(95, 15), (40, 5), (80, 24)] {
+        for (area_y, area_h) in [(0, 15), (2, 15), (10, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(buf_w, buf_h)).unwrap();
+            terminal.draw(|f| {
+                charts::boxplot(f, Rect::new(0, area_y, buf_w, area_h), &theme, &boxes);
+            }).expect("boxplot chart must not panic when area exceeds frame buffer");
+        }
+    }
+}
+
+#[test]
+fn scroll_lines_safely_handles_buffer_overflow_boundaries() {
+    let theme = ResolvedTuiTheme::default();
+    let lines_content: Vec<Line> = (0..50).map(|i| Line::from(format!("Line {i}"))).collect();
+
+    // Reproduce the exact boundary from the panic: buffer is 95x15, area exceeds frame buffer (e.g. y=1, h=15 -> bottom=16)
+    for (buf_w, buf_h) in [(95, 15), (40, 5), (80, 24)] {
+        for (area_y, area_h) in [(0, 15), (1, 15), (2, 15), (5, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(buf_w, buf_h)).unwrap();
+            terminal.draw(|f| {
+                let rect = Rect::new(0, area_y, buf_w, area_h);
+                panel_kit_tui::scroll::lines(f, rect, &theme, lines_content.clone(), 0);
+            }).expect("scroll::lines must never panic when area overflows frame buffer");
+        }
+    }
+}
+
+#[test]
+fn gauges_safely_handles_buffer_overflow_boundaries() {
+    let theme = ResolvedTuiTheme::default();
+    let items = workspace_canary::capacity_items();
+
+    for (buf_w, buf_h) in [(95, 15), (40, 5), (80, 24)] {
+        for (area_y, area_h) in [(0, 15), (1, 15), (2, 15), (5, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(buf_w, buf_h)).unwrap();
+            terminal.draw(|f| {
+                let rect = Rect::new(0, area_y, buf_w, area_h);
+                charts::gauges(f, rect, &theme, &items);
+            }).expect("gauges must never panic when area overflows frame buffer");
+        }
+    }
+}
+
+#[test]
+fn time_series_safely_handles_buffer_overflow_boundaries() {
+    let metrics = workspace_canary::Metrics::new();
+    let series = metrics.series();
+    let theme = ResolvedTuiTheme::default();
+
+    for (buf_w, buf_h) in [(95, 15), (40, 5), (80, 24)] {
+        for (area_y, area_h) in [(0, 15), (1, 15), (2, 15), (5, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(buf_w, buf_h)).unwrap();
+            terminal.draw(|f| {
+                let rect = Rect::new(0, area_y, buf_w, area_h);
+                charts::time_series(f, rect, &theme, "ms", &series);
+            }).expect("time_series must never panic when area overflows frame buffer");
+        }
+    }
+}

@@ -458,7 +458,9 @@ mod browser {
 
         fn draw(&mut self, frame: &mut ratatui::Frame) {
             self.tick += 1;
-            self.metrics.tick();
+            if self.tick % 6 == 0 {
+                self.metrics.tick();
+            }
             self.badge_zones.clear();
             self.hits.clear();
             self.sync_viewport(frame.area());
@@ -527,7 +529,10 @@ mod browser {
                     &mut self.hits,
                 );
                 draw_resize_grip(frame, panel, self.hover, &self.theme, &mut self.hits);
-                draw_panel_body(frame, body_rect, meta.stable_id.as_ref(), &mut body);
+                let body_rect = body_rect.intersection(frame.area());
+                if body_rect.width > 0 && body_rect.height > 0 {
+                    draw_panel_body(frame, body_rect, meta.stable_id.as_ref(), &mut body);
+                }
             }
 
             draw_dock(
@@ -598,7 +603,7 @@ mod browser {
                 clamp: &clamp,
                 command_step: self.input.steps,
                 tile: &tile,
-                snap: panel_kit_core::SnapPolicy::default(),
+                snap: panel_kit_core::SnapPolicy::CELLS,
             };
             let reduction = reduce(&mut self.snapshot, event, context);
             if !self.layout_ready {
@@ -725,11 +730,12 @@ mod browser {
                 .and_then(|value| value.as_f64())
                 .unwrap_or(0.0);
             if delta != 0.0 {
-                app.borrow_mut()
-                    .reduce_workspace_event(WorkspaceEvent::Wheel {
+                if let Ok(mut app) = app.try_borrow_mut() {
+                    app.reduce_workspace_event(WorkspaceEvent::Wheel {
                         delta_y: delta.signum() * 3.0,
                         disposition: WheelDisposition::BubbleToWorkspace,
                     });
+                }
             }
             if let Ok(prevent_default) = Reflect::get(&event, &JsValue::from_str("preventDefault"))
                 .and_then(|value| value.dyn_into::<Function>())
@@ -749,7 +755,6 @@ mod browser {
                 .grid_id("panel-kit-tui")
                 .cursor_shape(CursorShape::None)
                 .canvas_padding_color(Color::Black)
-                .disable_auto_css_resize()
                 .font_atlas_config(FontAtlasConfig::dynamic(
                     &["Fira Code", "JetBrains Mono", "monospace"],
                     16.0,
@@ -762,15 +767,27 @@ mod browser {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         terminal.on_key_event({
             let app = app.clone();
-            move |key| app.borrow_mut().handle_key(key)
+            move |key| {
+                if let Ok(mut app) = app.try_borrow_mut() {
+                    app.handle_key(key);
+                }
+            }
         })?;
 
         terminal.on_mouse_event({
             let app = app.clone();
-            move |event| app.borrow_mut().handle_mouse(event)
+            move |event| {
+                if let Ok(mut app) = app.try_borrow_mut() {
+                    app.handle_mouse(event);
+                }
+            }
         })?;
 
-        terminal.draw_web(move |frame| app.borrow_mut().draw(frame));
+        terminal.draw_web(move |frame| {
+            if let Ok(mut app) = app.try_borrow_mut() {
+                app.draw(frame);
+            }
+        });
         Ok(())
     }
 
@@ -781,5 +798,9 @@ mod browser {
 
 #[cfg(target_arch = "wasm32")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    browser::main()
+    if let Err(e) = browser::main() {
+        ratzilla::web_sys::console::error_1(&format!("browser_tui error: {e:?}").into());
+        return Err(e);
+    }
+    Ok(())
 }
