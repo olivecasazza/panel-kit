@@ -1,0 +1,151 @@
+/* TEMPLATE — not the shipped stylesheet.
+   `build.rs` substitutes every double-brace placeholder from
+   panel_kit_core::tokens and writes the result to OUT_DIR, which
+   `panel_kit::BOOT_CSS` includes. An unknown placeholder name is a hard
+   build error, which is why this note spells the syntax out instead of
+   showing it.
+
+   This file exists because the boot shell paints *before* the WASM module
+   instantiates, so it cannot read the injected `panel_kit::CSS` and cannot
+   inherit its `:root` variables. It used to carry a hand-copied palette that
+   had already drifted seven values off the tokens. Generating it makes that
+   class of drift impossible instead of merely discouraged.
+
+   Edit the rules here; never edit the generated file. */
+
+.panel-kit-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: {{bg}};
+  color: {{fg}};
+  font: 12px/1.35 {{mono}};
+}
+
+.panel-kit-boot-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 35px;
+  flex: 0 0 35px;
+  padding: 0 14px;
+  border-bottom: 1px solid {{line}};
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.panel-kit-boot-title { font-weight: 700; }
+.panel-kit-boot-status { color: {{dim}}; font-size: 10px; }
+
+/* Header progress bar. The static fragment is always indeterminate (no
+   script may measure pre-WASM); LoadingWorkspace fills determinate width +
+   percentage once Rust is live. */
+.panel-kit-boot-progress {
+  flex: 1;
+  max-width: 22rem;
+  height: 6px;
+  margin-left: auto;
+  background: {{line}};
+  border-radius: 3px;
+  overflow: hidden;
+}
+.panel-kit-boot-fill {
+  height: 100%;
+  background: {{blue}};
+  transition: width .4s ease;
+}
+.panel-kit-boot-fill.indeterminate {
+  width: 40%;
+  animation: panel-kit-boot-indet 1.2s linear infinite;
+}
+.panel-kit-boot-pct {
+  color: {{blue}};
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.panel-kit-boot-pct:empty { display: none; }
+
+@keyframes panel-kit-boot-indet {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.panel-kit-boot-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 44px 8px 8px;
+}
+
+.panel-kit-boot-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 90px;
+  border: 1px solid {{line2}};
+  border-radius: 4px;
+  background: {{panel}};
+  overflow: hidden;
+}
+
+.panel-kit-boot-panel:first-child { grid-row: 1 / span 2; }
+
+/* The traffic-light cluster, drawn as three discrete dots rather than the
+   striped gradient this used to be. The dots are what the mounted app shows,
+   so the boot shell now previews the real control instead of approximating
+   it — and three flat circles survive translation into cells, which a
+   gradient never could. */
+.panel-kit-boot-panel::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: {{blue}};
+  box-shadow: 14px 0 0 {{yellow}}, 28px 0 0 {{pink}};
+}
+
+.panel-kit-boot-line {
+  height: 6px;
+  margin: 34px 12px 0;
+  border-radius: 3px;
+  background: {{line}};
+  animation: panel-kit-boot-pulse 1.25s ease-in-out infinite alternate;
+}
+
+.panel-kit-boot-line + .panel-kit-boot-line {
+  width: 62%;
+  margin-top: 9px;
+  animation-delay: .18s;
+}
+
+/* Contract: the marked static fragment is the immediate sibling after the
+   empty Dioxus mount element. Dioxus marks that mount with data-dioxus-id;
+   the Rust LoadingWorkspace component has no static marker. */
+[data-dioxus-id] + .panel-kit-boot[data-panel-kit-static-boot] { display: none; }
+
+@keyframes panel-kit-boot-pulse {
+  from { opacity: .35; }
+  to { opacity: .9; }
+}
+
+@media (max-width: 680px) {
+  .panel-kit-boot-panels { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; }
+  .panel-kit-boot-panel:first-child { grid-row: auto; }
+  .panel-kit-boot-panel:last-child { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-kit-boot-line { animation: none; opacity: .65; }
+  .panel-kit-boot-fill { transition: none; }
+  .panel-kit-boot-fill.indeterminate { animation: none; width: 100%; opacity: .5; }
+}

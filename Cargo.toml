@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/panel-kit-core", "crates/panel-kit-tui"]
+members = ["crates/panel-kit-core", "crates/panel-kit-tui", "tools/spec-parity"]
 
 [package]
 name = "panel-kit"
-version = "0.2.0"
+version = "1.1.1"
 edition = "2021"
 license = "MIT"
 description = "Generic Dioxus panel-workspace library: floating/tiling panels, traffic lights, drag/resize, tiling drag-reorder, minimize-to-dock, layout persistence"
@@ -19,23 +19,51 @@ categories = ["gui", "wasm", "web-programming"]
 targets = ["wasm32-unknown-unknown"]
 default-target = "wasm32-unknown-unknown"
 
+# build.rs generates the pre-WASM boot stylesheet from the canonical token
+# source, so the palette cannot be hand-copied out of sync again.
+[build-dependencies]
+panel-kit-core = { version = "1.1.1", path = "crates/panel-kit-core" }
+
+
 [features]
-default = []
-bevy = ["dep:js-sys", "dep:wasm-bindgen-futures", "web-sys/HtmlCanvasElement", "web-sys/console"]
+default = ["web-runtime"]
+web-runtime = [
+    "dep:dioxus",
+    "dep:gloo-storage",
+    "dep:js-sys",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+    "panel-kit-core/spec-json",
+]
+bevy = ["web-runtime"]
+spec-plan = ["dep:serde", "dep:serde_json", "panel-kit-core/spec-json"]
 
 [dependencies]
-panel-kit-core = { version = "0.2.0", path = "crates/panel-kit-core" }
-dioxus = { version = "0.6", features = ["web"] }
-serde = { version = "1", features = ["derive"] }
-gloo-storage = "0.3"
-gloo-timers = { version = "0.3", features = ["futures"] }
+panel-kit-core = { version = "1.1.1", path = "crates/panel-kit-core" }
+dioxus = { version = "0.6", features = ["web"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+gloo-storage = { version = "0.3", optional = true }
 # Deliberately loose: consuming apps pin the exact wasm-bindgen their
 # toolchain ships (e.g. =0.2.118 to match nixpkgs' wasm-bindgen-cli).
-wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "EventTarget", "ResizeObserver", "ResizeObserverEntry"] }
-# Optional deps for bevy feature
-js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "EventTarget", "HtmlElement", "MediaQueryList", "Node", "NodeList", "PointerEvent", "ResizeObserver", "ResizeObserverEntry", "Selection", "Storage", "console"], optional = true }
+
+[dev-dependencies]
+# Headless markup rendering for the loading components' contract tests
+# (src/loading.rs): assertions run against real rendered HTML, not rsx
+# source text.
+dioxus-ssr = "0.6"
+# Poisoning-free test serialization lock (src/loading.rs drive harness).
+parking_lot = "0.12"
+# Fake-async delays in the loading example's hydration arc demo.
+gloo-timers = { version = "0.3", features = ["futures"] }
+panel-kit-tui = { version = "1.1.1", path = "crates/panel-kit-tui" }
 
 # Injected by dioxus-cli on first `dx build` — dx builds the example demos
 # under these profiles.

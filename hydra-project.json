@@ -1,0 +1,14 @@
+{
+  "main": {
+    "enabled": 1,
+    "hidden": false,
+    "description": "main - wasm32 panel-kit build, clippy, rustdoc, native core-unit-tests, spec-parity, theme-parity, workspace-spec web/TUI/browser canary lanes",
+    "type": 1,
+    "flake": "git+ssh://git@github.com/ocasazza/panel-kit?ref=main",
+    "checkinterval": 300,
+    "schedulingshares": 100,
+    "enableemail": false,
+    "emailoverride": "",
+    "keepnr": 10
+  }
+}

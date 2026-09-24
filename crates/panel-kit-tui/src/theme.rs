@@ -1,13 +1,23 @@
-//! Terminal palette mirroring the web shell's `:root` CSS variables, so
-//! the TUI looks like the same product. Override fields (or swap whole
-//! presets) to retheme — the terminal twin of overriding the CSS vars.
+//! Terminal conversion for the shared panel-kit theme tokens.
+//!
+//! This module adapts semantic colours into ratatui colours. Typography and
+//! density tokens are represented as explicit dispositions because terminal
+//! hosts, not ratatui, own font selection, glyph metrics, and pixel radii.
 
+mod disposition;
+
+use panel_kit_core::theme::{Color as CoreColor, ThemeColor, ThemeTokens};
 use ratatui::style::Color;
 
-/// The chrome palette. Field names match the CSS variables in
-/// `assets/panel-kit.css` (`--bg`, `--accent`, …).
-#[derive(Clone, Copy)]
-pub struct Theme {
+pub use disposition::{TuiDensityTheme, TuiThemeDisposition, TuiTypographyTheme};
+
+/// The chrome palette resolved for ratatui painters.
+///
+/// Field names match the CSS variables in `assets/panel-kit.css`
+/// (`--bg`, `--focus-ring`, …) so parity checks can walk the same
+/// [`ThemeColor`] slots for web and terminal consumers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedTuiTheme {
     /// Page background (`--bg`).
     pub bg: Color,
     /// Panel background (`--panel`).
@@ -20,6 +30,10 @@ pub struct Theme {
     pub line: Color,
     /// Stronger borders (`--line2`).
     pub line2: Color,
+    /// Inverted background (`--inv-bg`).
+    pub inverse_bg: Color,
+    /// Inverted foreground (`--inv-fg`).
+    pub inverse_fg: Color,
     /// Accent (`--accent`).
     pub accent: Color,
     /// Errors / unresolved (`--red`).
@@ -34,48 +48,88 @@ pub struct Theme {
     pub pink: Color,
     /// Informational badges (`--badge-info`).
     pub badge_info: Color,
+    /// Keyboard focus indicator (`--focus-ring`).
+    pub focus_ring: Color,
+    /// How terminal rendering handles each typography token.
+    pub typography: TuiTypographyTheme,
+    /// How terminal rendering handles each density token.
+    pub density: TuiDensityTheme,
 }
 
-impl Theme {
-    /// The default dark palette — the exact hex values from
-    /// `panel-kit.css`.
-    pub const DARK: Theme = Theme {
-        bg: Color::Rgb(0x0a, 0x0a, 0x0a),
-        panel: Color::Rgb(0x0d, 0x0d, 0x0d),
-        fg: Color::Rgb(0xed, 0xed, 0xed),
-        dim: Color::Rgb(0x7a, 0x7a, 0x7a),
-        line: Color::Rgb(0x26, 0x26, 0x26),
-        line2: Color::Rgb(0x3a, 0x3a, 0x3a),
-        accent: Color::Rgb(0x5e, 0xf3, 0x8c),
-        red: Color::Rgb(0xff, 0x5f, 0x56),
-        yellow: Color::Rgb(0xff, 0xbd, 0x2e),
-        green: Color::Rgb(0x27, 0xc9, 0x3f),
-        blue: Color::Rgb(0x3b, 0x9b, 0xff),
-        pink: Color::Rgb(0xff, 0x5f, 0xc3),
-        badge_info: Color::Rgb(0x83, 0xb7, 0xcc),
-    };
-
-    /// A light "paper" preset — the terminal twin of the theming example's
-    /// CSS-variable override path.
-    pub const PAPER: Theme = Theme {
-        bg: Color::Rgb(0xf4, 0xf1, 0xea),
-        panel: Color::Rgb(0xfb, 0xf9, 0xf4),
-        fg: Color::Rgb(0x1a, 0x1a, 0x1a),
-        dim: Color::Rgb(0x6e, 0x66, 0x5c),
-        line: Color::Rgb(0xd8, 0xd2, 0xc6),
-        line2: Color::Rgb(0xbf, 0xb8, 0xa8),
-        accent: Color::Rgb(0x0c, 0x7a, 0x3d),
-        red: Color::Rgb(0xc6, 0x28, 0x28),
-        yellow: Color::Rgb(0xb8, 0x86, 0x0b),
-        green: Color::Rgb(0x1d, 0x7a, 0x33),
-        blue: Color::Rgb(0x1f, 0x5e, 0xc2),
-        pink: Color::Rgb(0xc2, 0x1f, 0x8e),
-        badge_info: Color::Rgb(0x2e, 0x6e, 0x8c),
-    };
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::DARK
+impl ResolvedTuiTheme {
+    /// Convert shared theme tokens into ratatui colours and token dispositions.
+    pub fn from_tokens(tokens: &ThemeTokens) -> Self {
+        Self {
+            bg: rgb(tokens.colors.bg),
+            panel: rgb(tokens.colors.panel),
+            fg: rgb(tokens.colors.fg),
+            dim: rgb(tokens.colors.dim),
+            line: rgb(tokens.colors.line),
+            line2: rgb(tokens.colors.line2),
+            inverse_bg: rgb(tokens.colors.inverse_bg),
+            inverse_fg: rgb(tokens.colors.inverse_fg),
+            accent: rgb(tokens.colors.accent),
+            red: rgb(tokens.colors.red),
+            yellow: rgb(tokens.colors.yellow),
+            green: rgb(tokens.colors.green),
+            blue: rgb(tokens.colors.blue),
+            pink: rgb(tokens.colors.pink),
+            badge_info: rgb(tokens.colors.badge_info),
+            focus_ring: rgb(tokens.colors.focus_ring),
+            typography: TuiTypographyTheme::approximated(),
+            density: TuiDensityTheme::approximated(),
+        }
     }
+
+    /// Resolve one semantic colour slot to its ratatui colour.
+    pub fn color(&self, slot: ThemeColor) -> Color {
+        match slot {
+            ThemeColor::Bg => self.bg,
+            ThemeColor::Panel => self.panel,
+            ThemeColor::Fg => self.fg,
+            ThemeColor::Dim => self.dim,
+            ThemeColor::Line => self.line,
+            ThemeColor::Line2 => self.line2,
+            ThemeColor::InverseBg => self.inverse_bg,
+            ThemeColor::InverseFg => self.inverse_fg,
+            ThemeColor::Accent => self.accent,
+            ThemeColor::Red => self.red,
+            ThemeColor::Yellow => self.yellow,
+            ThemeColor::Green => self.green,
+            ThemeColor::Blue => self.blue,
+            ThemeColor::Pink => self.pink,
+            ThemeColor::BadgeInfo => self.badge_info,
+            ThemeColor::FocusRing => self.focus_ring,
+        }
+    }
+
+    /// Resolve one semantic colour slot back to core RGB channels.
+    pub fn resolve(&self, slot: ThemeColor) -> CoreColor {
+        match self.color(slot) {
+            Color::Rgb(r, g, b) => CoreColor::new(r, g, b),
+            other => panic!("resolved TUI theme used non-RGB color {other:?}"),
+        }
+    }
+}
+
+impl From<&ThemeTokens> for ResolvedTuiTheme {
+    fn from(tokens: &ThemeTokens) -> Self {
+        Self::from_tokens(tokens)
+    }
+}
+
+impl From<ThemeTokens> for ResolvedTuiTheme {
+    fn from(tokens: ThemeTokens) -> Self {
+        Self::from_tokens(&tokens)
+    }
+}
+
+impl Default for ResolvedTuiTheme {
+    fn default() -> Self {
+        Self::from_tokens(&ThemeTokens::dark())
+    }
+}
+
+fn rgb(color: CoreColor) -> Color {
+    Color::Rgb(color.r, color.g, color.b)
 }

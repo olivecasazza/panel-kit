@@ -1,47 +1,48 @@
-//! Cascade demo + regression harness for the ticking-parent state reset.
+//! Host-owned cascade demo, including parent rerenders while the popup is open.
 //!
 //! Run with: `dx serve --example cascade --platform web`
-//! (dioxus-cli 0.6.x; provided by `nix develop`)
-//!
-//! What it demonstrates:
-//! - CascadingDropdown over a robot -> campaign -> experiment tree, including
-//!   root-level leaves (robots without policies).
-//! - A parent that re-renders every 250 ms (the spot gym shell rerenders the
-//!   settings panel on every telemetry tick): the open cascade must keep its
-//!   descend path instead of resetting.
+
 use dioxus::prelude::*;
-use panel_kit::cascade::{CascadeAction, CascadeItem, CascadeState, CascadingDropdown};
+use panel_kit::widgets::{CascadeAction, CascadeItem, CascadeState, CascadingDropdown};
 use panel_kit::CSS;
+
+const DEMO_CSS: &str = "
+body { overflow:auto !important; }
+.demo { max-width:64rem; margin:0 auto; padding:2rem; }
+.demo h1 { margin:0 0 1rem; font-size:.8rem; }
+.demo p { color:var(--dim); }
+.demo button { background:transparent; color:var(--fg); border:1px solid var(--line2);
+  border-radius:3px; padding:.3rem .55rem; font:inherit; cursor:pointer; }
+";
 
 fn main() {
     dioxus::launch(App);
 }
 
 fn items() -> Vec<CascadeItem> {
-    let mut v = vec![];
+    let mut items = Vec::new();
     for campaign in ["spot-walk-pbt-v74", "spot-walk-pbt-v72"] {
-        for i in 0..3 {
-            v.push(CascadeItem {
+        for index in 0..3 {
+            items.push(CascadeItem {
                 path: vec!["spot".into(), campaign.into()],
-                value: format!("{campaign}-00{i}"),
-                label: format!("00{i}"),
+                value: format!("{campaign}-{index:03}"),
+                label: format!("{index:03} — policy with a deliberately long readable label"),
             });
         }
     }
     for robot in ["spider", "snake", "humanoid"] {
-        v.push(CascadeItem {
-            path: vec![],
+        items.push(CascadeItem {
+            path: Vec::new(),
             value: robot.into(),
             label: format!("{robot} (sandbox)"),
         });
     }
-    v
+    items
 }
 
 #[component]
 fn App() -> Element {
-    // Parent render storm: 4 ticks/second, like the gym shell's telemetry.
-    let mut tick = use_signal(|| 0u32);
+    let mut tick = use_signal(|| 0_u32);
     use_hook(move || {
         spawn(async move {
             loop {
@@ -51,28 +52,38 @@ fn App() -> Element {
         });
     });
 
-    let mut cascade_state = use_signal(CascadeState::default);
-    let mut selected = use_signal(|| "(none)".to_string());
+    let mut state = use_signal(CascadeState::default);
+    let mut selected_path = use_signal(Vec::<String>::new);
+    let mut selected_label = use_signal(String::new);
+    let selection = if selected_label().is_empty() {
+        "none".to_string()
+    } else {
+        format!("{} / {}", selected_path().join(" / "), selected_label())
+    };
 
     rsx! {
         style { {CSS} }
-        div { style: "padding:2rem; font-family:monospace;",
-            h1 { "cascade demo (tick {tick})" }
+        style { {DEMO_CSS} }
+        main { class: "demo",
+            h1 { "host-owned cascade" }
+            p { "parent render tick: {tick}" }
             CascadingDropdown {
                 items: items(),
-                state: cascade_state,
-                selected_label: selected(),
-                placeholder: "pick a robot / policy".to_string(),
-                on_action: move |a: CascadeAction| {
-                    if let CascadeAction::Select { path, value } = a {
-                        selected.set(format!("{path:?} -> {value}"));
+                state,
+                selected_path: selected_path(),
+                selected_label: selected_label(),
+                placeholder: "pick a robot or policy".to_string(),
+                on_action: move |action: CascadeAction| {
+                    if let CascadeAction::Select { path, value } = action {
+                        selected_path.set(path);
+                        selected_label.set(value);
                     }
                 },
             }
-            p { "selected: {selected}" }
+            p { "selection: {selection}" }
             button {
                 r#type: "button",
-                onclick: move |_| cascade_state.set(CascadeState::open()),
+                onclick: move |_| state.set(CascadeState::open()),
                 "open programmatically"
             }
         }

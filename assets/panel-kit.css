@@ -2,29 +2,51 @@
    High-contrast minimal dark theme, monospace throughout. Apps inject this
    first (style { {panel_kit::CSS} }) and layer their own styles after it;
    override the :root variables to retheme. */
+/* BEGIN GENERATED THEME TOKENS */
 :root {
-  --bg:    #0a0a0a;
+  --bg: #0a0a0a;
   --panel: #0d0d0d;
-  --fg:    #ededed;
-  --dim:   #7a7a7a;
-  --line:  #262626;
-  --line2: #3a3a3a;
-  --inv-bg:#ededed;
-  --inv-fg:#0a0a0a;
-  --accent:#5ef38c;
-  --red:   #ff5f56;
-  --yellow:#ffbd2e;
+  --fg: #ededed;
+  --dim: #7a7a7a;
+  --line: #262626;
+  --line2: #5f5f5f;
+  --inv-bg: #ededed;
+  --inv-fg: #0a0a0a;
+  --accent: #5ef38c;
+  --red: #ff5f56;
+  --yellow: #ffbd2e;
   --green: #27c93f;
-  --blue:  #3b9bff;
-  --pink:  #ff5fc3;
+  --blue: #3b9bff;
+  --pink: #ff5fc3;
+  --badge-info: #83b7cc;
+  --focus-ring: #ededed;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
+  --body-size: 13px;
+  --body-line-height: 1.5;
+  --label-size: 0.72rem;
+  --label-weight: 700;
+  --label-tracking: 0.06em;
+  --panel-radius: 4px;
+  --badge-radius: 999px;
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+}
+/* END GENERATED THEME TOKENS */
+:root {
+  --hit-min:24px;
+  --panel-head-h:22px;
+  /* Tiling grid: TILE_W_MAX columns, and the shortest a tile row may get
+     before the workspace scrolls instead of crushing content. */
+  --tile-cols:4;
+  --tile-row-min:90px;
 }
 
 * { box-sizing: border-box; }
 body, html, #main {
   margin:0; height:100%;
   background:var(--bg); color:var(--fg);
-  font-family:var(--mono); font-size:13px; line-height:1.5;
+  font-family:var(--mono); font-size:var(--body-size); line-height:var(--body-line-height);
   -webkit-font-smoothing:antialiased; overflow:hidden;
 }
 ::selection { background:var(--inv-bg); color:var(--inv-fg); }
@@ -32,12 +54,17 @@ body, html, #main {
 ::-webkit-scrollbar-thumb { background:var(--line2); }
 ::-webkit-scrollbar-track { background:transparent; }
 button { font-family:var(--mono); }
+.ws-root :focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
 
 .ws-root { display:flex; flex-direction:column; height:100vh; outline:none; }
 /* While a move/resize/reorder drag is in flight the pointer sweeps across
    other panels' text; without this the browser extends a text selection the
    whole way ("selects everything"). Applied via Workspace::root_class. */
 .ws-root.dragging, .ws-root.dragging * { -webkit-user-select:none; user-select:none; }
+.ws-root.dragging iframe,
+.ws-root.dragging canvas,
+.ws-root.dragging embed,
+.ws-root.dragging object { pointer-events:none; }
 
 /* Top bar */
 .topbar { display:flex; align-items:center; gap:1rem; height:36px; flex:0 0 36px;
@@ -49,82 +76,72 @@ button { font-family:var(--mono); }
 
 /* Workspace area */
 .ws { position:relative; flex:1; min-height:0; overflow:hidden; }
-/* Panels size to their CONTENT by default: `align-items:flex-start` stops each
-   panel stretching to its line, `align-content:flex-start` packs the lines to
-   the top so freed height collapses upward instead of leaving a void. Panels
-   that must fill (a canvas, a board, anything sized by percentage) opt back in
-   with `.panel-fill` — or, since every panel also carries a `.panel-<slug>`
-   class, straight from the app's own CSS. */
-.ws.tiling { display:flex; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; gap:8px; padding:8px; overflow:auto; }
-.ws.tiling .panel.panel-fill { align-self:stretch; }
-.ws.tiling.tiling-column { flex-flow:column wrap; overflow:hidden; }
-/* relative, not static: the .resize grip anchors to the tile. Inline
-   basis/height from the snapped spans override the fallbacks here; apps can
-   bump `--panel-grow` on individual panels to let them claim more row space.
-   height:auto + flex-grow allows vertical expansion to fill the container. */
+/* Tiling is a grid, not a wrapping flex line: tile_w/tile_h are spans, and
+   only a grid can honour them while still dividing a *bounded* height among
+   rows. Wrapping flex made the line height content-driven, so a panel with
+   overflowing content grew the row instead of scrolling inside it, and the
+   workspace overflowed. `minmax(var(--tile-row-min), 1fr)` fills the
+   viewport exactly when the tiles fit and scrolls once they cannot. */
+.ws.tiling { display:grid;
+  grid-template-columns:repeat(var(--tile-cols), minmax(0, 1fr));
+  grid-auto-rows:minmax(var(--tile-row-min), 1fr);
+  gap:var(--space-md); padding:var(--space-md); overflow:auto; }
+/* Relative, not static: the .resize grip anchors to the tile. `min-*:0` lets
+   a tile shrink below its content so .panel-body's own overflow scrolls.
+   Inline grid-column/grid-row from snapped spans override nothing here. */
 .ws.tiling .panel { position:relative !important; left:auto !important; top:auto !important;
-  flex:var(--panel-grow, 1) 1 var(--panel-basis, 340px);
-  min-width:var(--panel-min-w, 300px);
-  min-height:var(--panel-min-h, 110px);
-  height:auto; }
-.ws.tiling.tiling-column .panel {
-  width:var(--panel-cross-size, var(--tile-column-width, auto));
-  max-width:var(--panel-cross-size, var(--tile-column-width, none));
-}
+  min-width:0; min-height:0; height:auto; }
 .ws.maxed { padding:0; }
 
 /* Panels */
 .panel { display:flex; flex-direction:column; position:relative; background:var(--panel);
-  border:1px solid var(--line2); border-radius:4px; overflow:hidden;
-  box-shadow:0 6px 24px #0007; min-width:180px; min-height:110px; }
+  border:1px solid var(--line2); border-radius:var(--panel-radius); overflow:hidden;
+  min-width:180px; min-height:110px; }
+.panel.focused { border-color:var(--fg); }
+.ws.floating .panel.dragging { box-shadow:0 6px 24px #0007; }
 .panel-head {
   position:absolute; z-index:2; top:-1px; left:8px; right:8px;
-  display:flex; align-items:center; gap:.5rem; height:22px;
+  display:flex; align-items:center; gap:.5rem; height:var(--panel-head-h);
   padding:0 .35rem; background:var(--panel); cursor:move; user-select:none;
+  touch-action:none;
 }
+.panel-head:focus-visible { outline-offset:-2px; }
 .ws.tiling .panel-head { cursor:grab; }      /* drag to reorder into another slot */
 .ws.tiling .panel-head:active { cursor:grabbing; }
 .panel.tile-dragging { opacity:.55; outline:1px dashed var(--accent); outline-offset:-1px; }
-.panel-title { color:var(--fg); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+.panel-title { color:var(--fg); font-size:var(--label-size); font-weight:var(--label-weight); text-transform:uppercase; letter-spacing:var(--label-tracking);
   flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .max-hint { margin-left:auto; color:var(--dim); font-size:.65rem; }
-.panel-body { flex:1; min-height:0; overflow:auto; padding:1.75rem .55rem .55rem; }
-.panel-loading {
-  position:absolute; inset:22px 0 0 0; z-index:3;
-  display:grid; place-items:center; padding:1rem;
-  background:color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter:blur(1px);
-  pointer-events:none;
-}
-.panel-loading-card {
-  min-width:min(280px, 82%); max-width:420px;
-  border:1px solid var(--line2); background:var(--bg);
-  padding:.75rem .85rem; color:var(--fg);
-}
-.panel-loading-detail,
-.panel-loading-percent {
-  margin-top:.35rem; color:var(--dim); font-size:.72rem;
-}
-.panel-loading-track {
-  height:2px; margin-top:.55rem; background:var(--line); overflow:hidden;
-}
-.panel-loading-fill {
-  height:100%; background:var(--accent); transition:width .12s ease;
-}
-.panel-loading-fill.indeterminate {
-  width:40%; animation:panel-loading-slide 1.1s ease-in-out infinite;
-}
-@keyframes panel-loading-slide {
-  0% { transform:translateX(-100%); }
-  100% { transform:translateX(250%); }
-}
+/* App-supplied header actions. They live inside the --panel-head-h inset row,
+   so the visual control stays small while a transparent ::before brings the
+   interactive area up to --hit-min — the same trick .light and .badge-btn
+   use. `.active` earns the accent: a latched toggle is selection state, which
+   is exactly what the Lit Indicator Rule reserves the accent for. */
+.panel-head-actions { display:flex; align-items:center; gap:3px; flex:0 0 auto; min-width:0; }
+.panel-head-actions:empty { display:none; }
+.panel-head-action { position:relative; height:17px; min-width:20px; padding:0 4px;
+  border:1px solid var(--line2); border-radius:3px; background:var(--bg); color:var(--dim);
+  font-size:.65rem; line-height:15px; cursor:pointer; white-space:nowrap; }
+.panel-head-action::before { content:""; position:absolute; left:50%; top:50%;
+  width:max(100%, var(--hit-min)); height:var(--hit-min); transform:translate(-50%, -50%); }
+.panel-head-action:hover, .panel-head-action:focus-visible { border-color:var(--fg); color:var(--fg); }
+.panel-head-action.active { border-color:var(--accent); color:var(--accent); }
+.panel-head-action:disabled { opacity:.4; cursor:not-allowed; }
+.panel-body { flex:1; min-height:0; overflow:auto;
+  padding:calc(var(--panel-head-h) + var(--space-sm)) .55rem .55rem; }
 
 /* Traffic lights */
-.lights { display:flex; gap:6px; }
-.light { --light-c: var(--line2); width:12px; height:12px; border-radius:50%; border:0; padding:0;
-  cursor:pointer; opacity:.9; background:var(--light-c); box-shadow:0 0 0 0 transparent;
-  transition:opacity .12s ease, box-shadow .12s ease; }
-.light:hover, .light:focus-visible {
+.lights { display:flex; align-items:center; gap:6px; }
+.light { --light-c: var(--line2); position:relative; width:12px; height:12px;
+  flex:0 0 12px; border:0; padding:0; cursor:pointer; background:transparent; }
+/* Keep the chrome compact while expanding the pointer target for coarse input. */
+.light::before { content:""; position:absolute; left:50%; top:50%;
+  width:max(100%, var(--hit-min)); height:max(100%, var(--hit-min));
+  transform:translate(-50%, -50%); }
+.light::after { content:""; position:absolute; width:12px; height:12px; inset:50% auto auto 50%;
+  border-radius:50%; opacity:.9; background:var(--light-c); box-shadow:0 0 0 0 transparent;
+  transform:translate(-50%, -50%); transition:opacity .12s ease, box-shadow .12s ease; }
+.light:hover::after, .light:focus-visible::after {
   opacity:1;
   box-shadow:0 0 0 2px color-mix(in srgb, var(--light-c) 70%, transparent);
 }
@@ -137,28 +154,25 @@ button { font-family:var(--mono); }
 .light.yellow { --light-c: var(--yellow); }
 .light.max { --light-c: var(--pink); }
 
-/* Resize handle. z-index:3 keeps the grip grabbable above an embedded
-   BevyCanvas, whose layers occupy z-index 0/1/2 (background/canvas/overlay,
-   see bevy.rs BEVY_CSS) — without it the canvas paints over the grip and the
-   initial mousedown never reaches it, so resize never starts. */
-.resize { position:absolute; right:0; bottom:0; width:14px; height:14px; cursor:nwse-resize;
-  z-index:3; background:linear-gradient(135deg, transparent 50%, var(--line2) 50%); }
+/* Resize handle. Bevy's canvas layers use z-index 0/1/2, so the grip stays at
+   3: otherwise the canvas captures pointer-down before resize can start
+   (pointer-capture fix 1426e25). */
+.resize { position:absolute; right:0; bottom:0; z-index:3;
+  width:var(--hit-min); height:var(--hit-min);
+  border:0; padding:0; cursor:nwse-resize; background:transparent; touch-action:none; }
+.resize::after { content:""; position:absolute; right:0; bottom:0; width:14px; height:14px;
+  background:linear-gradient(135deg, transparent 50%, var(--line2) 50%); }
 
 /* Dock footer */
 .dock { display:flex; align-items:center; gap:.5rem; height:30px; flex:0 0 30px;
   padding:0 .75rem; border-top:1px solid var(--line); background:var(--panel); overflow-x:auto; }
 .dock-label { color:var(--dim); font-size:.7rem; }
-.dock-empty { color:var(--line2); font-size:.7rem; }
-.dock-chip { background:var(--bg); color:var(--fg); border:1px solid var(--line2);
-  border-radius:3px; padding:.2rem .5rem; font-size:.72rem; cursor:pointer; white-space:nowrap; }
+.dock-empty { color:var(--dim); font-size:.7rem; }
+.dock-chip { min-width:var(--hit-min); min-height:var(--hit-min);
+  background:var(--bg); color:var(--fg);
+  border:1px solid var(--line2); border-radius:3px; padding:.35rem .5rem;
+  font-size:.72rem; cursor:pointer; white-space:nowrap; }
 .dock-chip:hover { border-color:var(--fg); }
-.dock .snap-toggle { background:transparent; border:1px solid var(--line2);
-  border-radius:3px; padding:.15rem .4rem; font-size:.65rem; cursor:pointer;
-  white-space:nowrap; color:var(--dim); transition:color .1s, border-color .1s;
-  margin-left:auto; }
-.dock .snap-toggle + .snap-toggle { margin-left:.5rem; }
-.dock .snap-toggle.on { color:var(--accent); border-color:var(--accent); }
-.dock .snap-toggle:hover { border-color:var(--fg); }
 
 /* Shared content states */
 .empty, .skeleton { display:grid; place-items:center; height:100%; color:var(--dim);
@@ -172,69 +186,118 @@ button { font-family:var(--mono); }
 .spin-label { color:var(--accent); font-size:.78rem; }
 @keyframes spin { to { transform:rotate(360deg); } }
 
+/* Loading surfaces: bars over spinners (Spinner stays for tiny inline waits).
+   A determinate bar always shows its percentage; the indeterminate state
+   animates and shows no fabricated number. */
+.pk-progress { display:flex; flex-direction:column; gap:.3rem; width:100%;
+  max-width:26rem; }
+.pk-progress-head { display:flex; align-items:baseline; gap:.5rem;
+  font-size:.72rem; letter-spacing:.03em; }
+.pk-progress-label { color:var(--fg); }
+.pk-progress-detail { color:var(--dim); font-size:.68rem; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-progress-pct { flex:0 0 auto; margin-left:auto; color:var(--accent);
+  font-variant-numeric:tabular-nums; }
+/* The track was rgba(255,255,255,.06): a translucent surface, which no cell
+   grid can express. --bg on --panel is the same recessed read and survives
+   translation. */
+.pk-progress-track { height:.55rem; background:var(--bg);
+  border:1px solid var(--line2); border-radius:3px; overflow:hidden; }
+.pk-progress-fill { height:100%; background:var(--accent);
+  transition:width .4s ease; }
+.pk-progress-fill.indeterminate { width:40%;
+  animation:pk-indet 1.2s infinite linear; }
+@keyframes pk-indet { 0% { transform:translateX(-100%); }
+  100% { transform:translateX(350%); } }
+.pk-progress.compact { max-width:none; gap:.15rem; }
+.pk-progress.compact .pk-progress-track { height:.3rem; }
+
+/* Panel-level hydration gate (LoadingGate): fills the panel body. */
+.pk-gate { display:grid; place-items:center; align-content:center; gap:.4rem;
+  height:100%; padding:1rem; box-sizing:border-box; }
+.pk-gate-label { color:var(--dim); font-size:.78rem; letter-spacing:.03em; }
+.pk-gate-detail { color:var(--dim); font-size:.68rem; max-width:32rem;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-gate-error .pk-gate-label, .pk-gate-error .pk-gate-detail { color:var(--red); }
+
+/* Workspace-level aggregate (GlobalLoadingBar): one compact strip, mounted
+   in the app top bar. */
+.pk-global-load { margin-left:auto; min-width:12rem; max-width:20rem;
+  flex:0 1 20rem; }
+/* Compact surfaces give the global bar the full row: at 390px a 12rem floor
+   plus an auto left margin pushes the percentage off the edge, and the head
+   has to wrap rather than truncate the label away entirely. */
+.ws-root.compact .pk-global-load { width:100%; min-width:0; max-width:none;
+  flex-basis:100%; margin-left:0; }
+.ws-root.compact .pk-progress-head { display:grid;
+  grid-template-columns:minmax(0, 1fr) auto; }
+.ws-root.compact .pk-progress-label { overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; }
+.ws-root.compact .pk-progress-detail { grid-column:1 / -1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pk-progress-fill { transition:none; }
+  /* Keep an honest indeterminate read with motion removed: a full-width bar
+     would claim completion, and opacity is translucency the terminal cannot
+     draw. A static 40% sliver still says "working, extent unknown". */
+  .pk-progress-fill.indeterminate { animation:none; width:40%; transform:none; }
+}
+
 /* Fixed info-tooltip overlay (viewport-placed at the app root) */
-.tip-overlay { position:fixed; width:228px; z-index:6000; background:#0d0d0d;
+.tip-overlay { position:fixed; width:228px; z-index:6000; background:var(--panel);
   border:1px solid var(--line2); border-radius:5px; padding:.5rem .6rem;
   box-shadow:0 10px 30px #000c; }
 
-/* ─── Responsive shell ─── */
-/* ponytail: single breakpoint at 760px; add tablet (1024px) when needed */
+/* Compact shell — single-column stack. Window-management chrome is withheld
+   by the RENDERER (SurfaceProfile::window_management), not hidden here: a
+   `display:none` would also hide the magenta restore light that compact must
+   still show for a panel that arrived maximized through persistence. One
+   source of truth, same rule as --tile-cols. */
+.compact .topbar { height:auto; flex-wrap:wrap; padding:.4rem .6rem; gap:.5rem; }
+.compact .topbar h1 { font-size:.9rem; }
+/* Column count comes from core via the inline --tile-cols on .ws (see
+   SurfaceProfile::tile_columns), so no tier re-tabulates it here. Compact
+   only relaxes the row floor: a phone stack is a list, so tiles are
+   content-floored rather than sharing a bounded height. */
+.compact .ws.tiling { padding:var(--space-sm); gap:var(--space-sm); grid-auto-rows:minmax(200px, 1fr); }
+.compact .panel-head { cursor:default; }
 
-/* Mobile (<760px): single-column stack, no window management */
-.mobile .topbar { height:auto; flex-wrap:wrap; padding:.4rem .6rem; gap:.5rem; }
-.mobile .topbar h1 { font-size:.9rem; }
-.mobile .ws.tiling,
-.mobile .ws.tiling.tiling-column {
-  flex-flow:column nowrap !important; padding:6px; gap:6px; overflow-y:auto;
-}
-.mobile .ws.tiling .panel,
-.mobile .ws.tiling.tiling-column .panel {
-  flex:0 0 100% !important; min-width:0 !important;
-  width:100% !important; max-width:none !important;
-  min-height:180px; max-height:none; height:auto;
-}
-.mobile .panel-body { max-height:70vh; overflow:auto; }
-.mobile .lights { display:none; }
-.mobile .panel-head { cursor:default; touch-action:manipulation; }
-.mobile .resize { display:none; }
-.mobile .dock { display:none; }  /* ponytail: hide dock on mobile, restore if needed */
-
-/* Touch targets: larger on mobile touch devices only */
-@media (pointer:coarse) and (max-width:759px) {
-  .light { width:22px; height:22px; }
-  .dock-chip { padding:.4rem .7rem; font-size:.8rem; }
-  .panel-head { min-height:28px; }
-}
-
-/* CSS fallback if JS hasn't set .mobile yet (FOUC guard) */
-@media (max-width:759px) {
-  .ws-root:not(.mobile) .ws.tiling .panel { flex:0 0 100%; }
-  .ws-root:not(.mobile) .lights { opacity:0; pointer-events:none; }
-}
+/* Touch sizing follows the POINTER, not the width. `coarse` comes from
+   matchMedia('(pointer: coarse)') via SurfaceProfile::caps, so a 1400px kiosk
+   touchscreen gets 44px targets and a 900px mouse-driven window does not —
+   both of which a width-keyed rule got backwards. */
+.ws-root.coarse { --hit-min:44px; }
+.ws-root.coarse .dock { height:44px; min-height:44px; flex-basis:44px; }
 
 /* === badge component === */
 /* Port of the egui badge palette onto the theme variables:
    PURPLE (brand/active) -> --accent, GOOD -> --green, WARNING -> --yellow,
    BAD -> --red, GREY -> --dim, BORDER -> --line2, WHITE -> --fg,
-   BLACK fill -> --bg. INFO (#83b7cc) has no theme counterpart, so it stays
-   a badge-local variable. Per-kind classes set --badge-c (border) +
-   --badge-fg (text); inline style overrides them for community tints
-   (--badge-bg too) and one-shot status/ticket stroke colours. */
+   BLACK fill -> --bg, INFO -> --badge-info. Per-kind classes set --badge-c
+   (border) + --badge-fg (text); inline style overrides them for community
+   tints (--badge-bg too) and one-shot status/ticket stroke colours. */
 .badge {
-  --badge-info: #83b7cc;
   --badge-c: var(--line2);
   --badge-fg: var(--fg);
   display:inline-flex; align-items:center; gap:2px;
   padding:4px 10px;
   background:var(--badge-bg, var(--bg));
   border:1px solid var(--badge-c);
-  border-radius:999px;                /* radius >= height/2 == egui pill */
+  border-radius:var(--badge-radius);                /* radius >= height/2 == egui pill */
   color:var(--badge-fg);
-  font-family:var(--mono); font-size:.72rem; line-height:1.3;
-  cursor:pointer; user-select:none; white-space:nowrap; max-width:100%;
+  font-family:var(--mono); font-size:var(--label-size); line-height:1.3;
+  user-select:none; white-space:nowrap; max-width:100%;
 }
 .badge.small { padding:2px 6px; }     /* cramped chip-strip variant */
-.badge:focus-visible { outline:1px solid var(--badge-c); outline-offset:1px; }
+.badge-main {
+  display:inline-flex; align-items:center; min-width:0; min-height:var(--hit-min);
+  margin-block:calc((var(--hit-min) - 1.3em) / -2);
+  appearance:none; background:none; border:0; padding:0;
+  color:inherit; font:inherit; line-height:inherit; cursor:pointer;
+}
+.badge-main:focus-visible, .badge-btn:focus-visible {
+  outline:1px solid var(--badge-c); outline-offset:1px;
+}
 /* egui sizes to content; DOM rows need a cap — full value lives in title. */
 .badge-label { overflow:hidden; text-overflow:ellipsis; max-width:28ch; }
 /* Hover lift: fill drifts toward the border colour + soft border-coloured
@@ -249,7 +312,7 @@ button { font-family:var(--mono); }
   background:var(--badge-bg, color-mix(in srgb, var(--accent) 25%, var(--bg)));
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
 }
-.badge-tag { --badge-c: var(--accent); }
+.badge-tag { --badge-c: var(--badge-info); }
 .badge-doctype, .badge-author { --badge-c: var(--badge-info); }
 .badge-folder { --badge-c: var(--dim); }
 .badge-entity, .badge-date { --badge-c: var(--yellow); }
@@ -260,10 +323,95 @@ button { font-family:var(--mono); }
 .badge-generic { --badge-c: var(--line2); }
 /* Trailing `+` / `×` affordances: dimmed fg, full fg on hover (egui
    tint(fg, 0.7) -> WHITE). */
-.badge-btn { background:none; border:none; padding:0 0 0 4px; margin:0;
+.badge-btn { display:inline-grid; place-items:center; width:var(--hit-min); height:var(--hit-min);
+  min-width:var(--hit-min); min-height:var(--hit-min); background:none; border:0; padding:0;
+  margin-block:calc((var(--hit-min) - 1em) / -2);
+  margin-left:calc(4px - (var(--hit-min) - 1em) / 2);
+  margin-right:calc((var(--hit-min) - 1em) / -2);
   cursor:pointer; line-height:1; font-family:var(--mono); font-size:.85rem;
   color:color-mix(in srgb, var(--badge-fg) 70%, transparent); }
 .badge-btn:hover { color:var(--fg); }
+
+/* === monaco editor component (src/editor.rs) === */
+/* Fills its parent (e.g. a .panel-body) edge to edge; Monaco itself is
+   themed via the `panel-kit-dark` editor theme — these rules only cover the
+   container and the loading/error overlay. Monaco's own overflow widgets
+   escape .panel's overflow:hidden via fixedOverflowWidgets. */
+.pk-monaco { position:relative; display:flex; flex-direction:column; width:100%; height:100%;
+  min-width:0; min-height:0; background:var(--panel); }
+.pk-monaco-host { flex:1; min-width:0; min-height:0; }
+.pk-monaco-status { position:absolute; inset:0; display:grid; place-items:center; color:var(--dim);
+  font-size:.78rem; letter-spacing:.03em; pointer-events:none; animation:pulse 1.1s infinite; }
+.pk-monaco-error { color:var(--red); animation:none; padding:0 .8rem; text-align:center; }
+
+/* === dropdown widget === */
+/* Grouped, searchable single-select. Theme variables only; the popup is
+   absolutely positioned under the button and scrolls for long lists. */
+.pk-dropdown { position:relative; display:inline-block; min-width:0; }
+.pk-dropdown-btn { display:flex; align-items:center; gap:.5rem; width:100%;
+  background:color-mix(in srgb, var(--fg) 7%, var(--bg)); color:var(--fg);
+  border:1px solid var(--line2); border-radius:6px; padding:.3rem .55rem;
+  font-family:var(--mono); font-size:12px; cursor:pointer; text-align:left;
+  transition:border-color .12s, background .12s; }
+.pk-dropdown-btn:hover, .pk-dropdown-btn:focus-visible {
+  border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.pk-dropdown-open > .pk-dropdown-btn {
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent); }
+.pk-dropdown-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-dropdown-caret { opacity:.6; transition:transform .12s; }
+.pk-dropdown-open > .pk-dropdown-btn .pk-dropdown-caret {
+  transform:rotate(180deg); opacity:1; color:var(--accent); }
+.pk-dropdown-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
+  min-width:100%; max-width:min(70vw, 480px); background:var(--bg);
+  border:1px solid var(--border,#2a2a2a); border-radius:6px; outline:none;
+  box-shadow:0 8px 24px rgba(0,0,0,.5); }
+.pk-dropdown-search { width:100%; box-sizing:border-box; background:var(--bg);
+  color:var(--fg); border:0; border-bottom:1px solid var(--border,#2a2a2a);
+  padding:.4rem .55rem; font-family:var(--mono); font-size:12px; outline:none; }
+.pk-dropdown-search:focus { box-shadow:inset 0 -1px 0 var(--accent); }
+.pk-dropdown-list { max-height:50vh; overflow-y:auto; padding:.25rem 0; }
+.pk-dropdown-group-label { padding:.3rem .55rem .15rem; font-size:10px;
+  letter-spacing:.04em; text-transform:none;
+  /* Dim via text color only: opacity would fade the solid background too,
+     letting scrolled items bleed through the sticky header. */
+  color:color-mix(in srgb, var(--fg) 55%, transparent);
+  position:sticky; top:0; background:var(--bg); }
+.pk-dropdown-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-dropdown-item:hover { background:var(--surface-2,#161616); }
+.pk-dropdown-item.highlighted { background:var(--surface-2,#161616);
+  box-shadow:inset 2px 0 0 var(--accent); }
+.pk-dropdown-item.selected { color:var(--accent); }
+.pk-dropdown-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
+
+/* === cascade widget === */
+/* Miller-columns cascade over panel-kit-core::widgets::cascade. Reuses the
+   dropdown trigger theme; columns are laid out side by side below the button.
+   The root shrink-wraps to the breadcrumb text instead of stretching to its
+   container. max-width keeps it inside narrow hosts, where the label
+   ellipsizes. */
+.pk-cascade { position:relative; display:inline-block; min-width:0;
+  width:max-content; max-width:100%; }
+.pk-cascade-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
+  display:flex; background:var(--bg); border:1px solid var(--border,#2a2a2a);
+  border-radius:6px; outline:none; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  /* Long leaf labels must stay readable: columns fit their text up to 26rem,
+     the popup grows to the viewport bound, and horizontal scroll is the last
+     resort instead of hiding every label behind ellipsis. */
+  max-width:min(92vw, 64rem); overflow-x:auto; }
+.pk-cascade-col { min-width:9rem; max-width:26rem; width:max-content;
+  max-height:50vh; overflow-y:auto; padding:.25rem 0; flex-shrink:0; }
+.pk-cascade-col + .pk-cascade-col { border-left:1px solid var(--border,#2a2a2a); }
+.pk-cascade-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+.pk-cascade-item:hover { background:var(--surface-2,#161616); }
+.pk-cascade-item.highlighted { background:var(--surface-2,#161616);
+  box-shadow:inset 2px 0 0 var(--accent); }
+.pk-cascade-item.selected { color:var(--accent); }
+.pk-cascade-item .pk-cascade-chevron { opacity:.5; }
+.pk-cascade-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
 
 /* === grafana embed panel === */
 /* Fills its host panel; the iframe carries Grafana's own chrome (or none, in
@@ -316,95 +464,60 @@ button { font-family:var(--mono); }
   padding:.5rem .6rem; white-space:pre; overflow:auto; tab-size:2; }
 .ide-textarea:focus { box-shadow:inset 0 0 0 1px var(--accent); }
 
-/* === dropdown component === */
-/* Grouped, searchable single-select. Theme variables only; the popup is
-   absolutely positioned under the button and scrolls for long lists. */
-.pk-dropdown { position:relative; display:inline-block; min-width:0; }
-.pk-dropdown-btn { display:flex; align-items:center; gap:.5rem; width:100%;
-  background:color-mix(in srgb, var(--fg) 7%, var(--bg)); color:var(--fg);
-  border:1px solid var(--line2); border-radius:6px; padding:.3rem .55rem;
-  font-family:var(--mono); font-size:12px; cursor:pointer; text-align:left;
-  transition:border-color .12s, background .12s; }
-.pk-dropdown-btn:hover, .pk-dropdown-btn:focus-visible {
-  border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--bg)); }
-.pk-dropdown-open > .pk-dropdown-btn {
-  border-color:var(--accent);
-  box-shadow:0 0 0 1px var(--accent); }
-.pk-dropdown-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pk-dropdown-caret { opacity:.6; transition:transform .12s; }
-.pk-dropdown-open > .pk-dropdown-btn .pk-dropdown-caret {
-  transform:rotate(180deg); opacity:1; color:var(--accent); }
-.pk-dropdown-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
-  min-width:100%; max-width:min(70vw, 480px); background:var(--bg);
-  border:1px solid var(--border,#2a2a2a); border-radius:6px; outline:none;
-  box-shadow:0 8px 24px rgba(0,0,0,.5); }
-.pk-dropdown-search { width:100%; box-sizing:border-box; background:var(--bg);
-  color:var(--fg); border:0; border-bottom:1px solid var(--border,#2a2a2a);
-  padding:.4rem .55rem; font-family:var(--mono); font-size:12px; outline:none; }
-.pk-dropdown-search:focus { box-shadow:inset 0 -1px 0 var(--accent); }
-.pk-dropdown-list { max-height:50vh; overflow-y:auto; padding:.25rem 0; }
-.pk-dropdown-group-label { padding:.3rem .55rem .15rem; font-size:10px;
-  letter-spacing:.04em; text-transform:none;
-  /* dim via text color only: opacity would fade the solid background too,
-     letting scrolled items bleed through the sticky header */
-  color:color-mix(in srgb, var(--fg) 55%, transparent);
-  position:sticky; top:0; background:var(--bg); }
-.pk-dropdown-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.pk-dropdown-item:hover { background:var(--surface-2,#161616); }
-.pk-dropdown-item.highlighted { background:var(--surface-2,#161616);
-  box-shadow:inset 2px 0 0 var(--accent); }
-.pk-dropdown-item.selected { color:var(--accent); }
-.pk-dropdown-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
+/* Keyed wrapper keeps a panel's DOM identity stable without adding a layout box. */
+.pk-keepalive-slot {
+  display: contents;
+}
 
-/* Miller-columns cascade (panel-kit-core::cascade). Reuses dropdown theme
-   variables; columns are laid out side by side under the button. The root
-   shrink-wraps the button to the breadcrumb text (max-content) instead of
-   stretching to the container — the cascade's breadcrumb ("robot / campaign /
-   experiment") is read as a label, not a form field. max-width:100% keeps it
-   inside narrow hosts, where the label falls back to ellipsis. */
-.pk-cascade { position:relative; display:inline-block; min-width:0;
-  width:max-content; max-width:100%; }
-.pk-cascade-popup { position:absolute; z-index:100; top:calc(100% + 4px); left:0;
-  display:flex; background:var(--bg); border:1px solid var(--border,#2a2a2a);
-  border-radius:6px; outline:none; box-shadow:0 8px 24px rgba(0,0,0,.5);
-  /* Long leaf labels (policy names) must stay readable: columns size to
-     content up to 26rem each, the popup grows to the viewport bound, and
-     horizontal scroll is the last resort — ellipsis alone hid the labels. */
-  max-width:min(92vw, 64rem); overflow-x:auto; }
-.pk-cascade-col { min-width:9rem; max-width:26rem; width:max-content;
-  max-height:50vh; overflow-y:auto; padding:.25rem 0; flex-shrink:0; }
-.pk-cascade-col + .pk-cascade-col { border-left:1px solid var(--border,#2a2a2a); }
-.pk-cascade-item { padding:.28rem .55rem; font-size:12px; cursor:pointer;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
-.pk-cascade-item:hover { background:var(--surface-2,#161616); }
-.pk-cascade-item.highlighted { background:var(--surface-2,#161616);
-  box-shadow:inset 2px 0 0 var(--accent); }
-.pk-cascade-item.selected { color:var(--accent); }
-.pk-cascade-item .pk-cascade-chevron { opacity:.5; }
-.pk-cascade-empty { padding:.5rem .55rem; font-size:12px; opacity:.5; }
+/* Off-layout keep-alive panels retain descendants but do not paint or participate in layout. */
+.pk-keepalive-slot.pk-keepalive-hidden {
+  display: none;
+}
 
-/* === table component === */
-/* Low-chrome data table. Sticky header is OPAQUE (background:var(--bg)):
-   translucent sticky elements let scrolled rows bleed through — the same
-   bug the dropdown group headers had. Cells ellipsize with a title tooltip
-   carrying the full text. */
+/* === bevy canvas === */
+.bevy-canvas-container { width:100%; height:100%; position:relative; overflow:hidden; }
+.bevy-canvas { width:100%; height:100%; display:block; touch-action:none;
+  position:relative; z-index:1; }
+.bevy-canvas-loading { position:absolute; inset:0; z-index:0;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--dim, #7a7a7a); font-size:12px; pointer-events:none; }
+.bevy-canvas-error { position:absolute; inset:0; z-index:2;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--red, #ff5f56); font-size:12px; padding:8px; text-align:center; }
+
+/* === interactive table === */
+/* The opaque sticky header prevents scrolled rows from bleeding through.
+   Ellipsized cells retain their complete value in a title tooltip. */
 .pk-table-wrap { overflow:auto; max-height:60vh; border:1px solid var(--line);
-  border-radius:6px; }
+  border-radius:var(--panel-radius); }
 .pk-table { width:100%; border-collapse:collapse; font-family:var(--mono);
   font-size:12px; color:var(--fg); }
 .pk-table th { position:sticky; top:0; z-index:1; background:var(--bg);
-  text-align:left; padding:.35rem .55rem; font-weight:600;
-  color:color-mix(in srgb, var(--fg) 55%, transparent);
-  border-bottom:1px solid var(--line2); white-space:nowrap; }
+  padding:.35rem .55rem; font-weight:600; color:var(--dim);
+  border-bottom:1px solid var(--line2); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
 .pk-table td { padding:.3rem .55rem; border-bottom:1px solid var(--line);
   max-width:22rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pk-table-dense th { padding:.2rem .45rem; }
 .pk-table-dense td { padding:.14rem .45rem; }
 .pk-table-row.clickable { cursor:pointer; }
-.pk-table-row.clickable:hover { background:var(--surface-2,#161616); }
+.pk-table-row.clickable:hover { background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
 .pk-table-row.selected { color:var(--accent);
   box-shadow:inset 2px 0 0 var(--accent);
   background:color-mix(in srgb, var(--accent) 8%, var(--bg)); }
-.pk-table-empty { padding:.5rem .55rem; opacity:.5; text-align:center; }
+.pk-table-empty { padding:.5rem .55rem; color:var(--dim); text-align:center; }
+
+/* === host-owned dock policy controls === */
+.dock-extras { display:flex; align-items:center; margin-left:auto; }
+.snap-toggle { display:flex; align-items:center; justify-content:flex-end; gap:.25rem;
+  margin-left:auto; white-space:nowrap; }
+.snap-toggle button { display:inline-flex; align-items:center; gap:.25rem;
+  min-height:var(--hit-min); padding:.15rem .35rem; border:1px solid transparent;
+  border-radius:3px; background:transparent; color:var(--dim);
+  font-family:var(--mono); font-size:.68rem; cursor:pointer; }
+.snap-toggle button:hover, .snap-toggle button:focus-visible {
+  border-color:var(--line2); color:var(--fg); }
+.snap-toggle button.on { color:var(--fg); }
+.snap-toggle button.on .snap-toggle-glyph { color:var(--accent); }
+.snap-toggle button.off .snap-toggle-glyph { color:var(--dim); }
+.snap-toggle button.reset { margin-left:.25rem; color:var(--fg); }
