@@ -189,9 +189,13 @@ pub fn tiled_cell_rect(
     };
 
     let x = workspace.x as f64 + grid.padding + column as f64 * (grid.track_w + grid.gap);
-    let y = workspace.y as f64 + grid.padding + row as f64 * (grid.track_h + grid.gap) - scroll;
+    // Rows carry their own heights; a row's offset is the sum of the rows
+    // above it, not a shared track height times its index.
+    let rows_above = grid.row_heights.total(row);
+    let y = workspace.y as f64 + grid.padding + rows_above + row as f64 * grid.gap - scroll;
     let w = column_span as f64 * grid.track_w + column_span.saturating_sub(1) as f64 * grid.gap;
-    let h = row_span as f64 * grid.track_h + row_span.saturating_sub(1) as f64 * grid.gap;
+    let h = grid.row_heights.total(row + row_span as u16) - rows_above
+        + row_span.saturating_sub(1) as f64 * grid.gap;
 
     Some(Rect::new(
         x.max(0.0) as u16,

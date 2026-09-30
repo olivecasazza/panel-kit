@@ -5,7 +5,10 @@ use crate::{
 };
 
 use super::scratch::{ProjectionBuffer, TilePlacement};
-use super::{Placement, ProjectionInput, TileFillOrder, TileGridProjection, TileLayoutMetrics};
+use super::{
+    Placement, ProjectionInput, RowHeights, TileFillOrder, TileGridProjection, TileLayoutMetrics,
+    MAX_TILE_ROWS,
+};
 
 pub(super) struct PanelRegionContext<'a, 'b, K: PanelKey> {
     pub(super) workspace: Region,
@@ -37,20 +40,59 @@ pub(super) fn project_tiles<K: PanelKey>(
         .max(metrics.resize.col_floor)
         .max(0.0);
     let natural_h = metrics.row_min.max(0.0);
-    let track_h = if metrics.fill_viewport {
-        natural_h.max(usable_h / rows as f64)
-    } else {
-        natural_h
-    };
+    let row_heights =
+        project_row_heights(scratch, rows, natural_h, usable_h, metrics.fill_viewport);
 
     TileGridProjection {
         columns,
         rows,
         track_w,
-        track_h,
+        row_heights,
         gap: metrics.gap.max(0.0),
         padding: metrics.padding.max(0.0),
     }
+}
+
+/// Size each row from the panels actually in it.
+///
+/// `natural` is the floor every row respects. When `fill_viewport` is set, the
+/// slack between the rows' natural heights and `usable_h` is shared out over
+/// the rows rather than applied as one uniform track height. Sharing it evenly
+/// preserves relative row heights, which is the whole point: under the old
+/// single `track_h`, growing one panel's `row_span` raised `rows`, shrank
+/// `usable_h / rows`, and so shrank every other row with it.
+fn project_row_heights<K: PanelKey>(
+    _scratch: &ProjectionBuffer<K>,
+    rows: u16,
+    natural: f64,
+    usable_h: f64,
+    fill_viewport: bool,
+) -> RowHeights {
+    let count = (rows as usize).clamp(1, MAX_TILE_ROWS);
+
+    // Every row is exactly `natural`. A panel with row_span = N is rendered as
+    // the SUM of the N rows it covers, so it receives N * natural by covering
+    // them - it must NOT also scale its anchor row by N. Doing both made a
+    // span-N panel occupy natural * (2N - 1) instead of N.
+    let mut heights = [natural; MAX_TILE_ROWS];
+
+    if fill_viewport {
+        // Share the leftover band evenly. Even sharing keeps every row's
+        // height independent of the row COUNT, which is the whole point:
+        // under the old single `track_h = max(natural, usable_h / rows)`,
+        // adding a row deflated `usable_h / rows` and so shrank every existing
+        // row - resizing one tile silently resized its neighbours.
+        let base: f64 = heights[..count].iter().sum();
+        let slack = usable_h - base;
+        if slack > 0.0 {
+            let each = slack / count as f64;
+            for h in heights.iter_mut().take(count) {
+                *h += each;
+            }
+        }
+    }
+
+    RowHeights(heights)
 }
 
 fn project_row_major<K: PanelKey>(
@@ -249,10 +291,14 @@ pub(super) fn tile_region(
     scroll: f64,
 ) -> (Region, Placement) {
     let x = workspace.x + grid.padding + placement.column as f64 * (grid.track_w + grid.gap);
-    let y = workspace.y + grid.padding + placement.row as f64 * (grid.track_h + grid.gap) - scroll;
+    // Rows accumulate their own heights, so a row's offset no longer depends
+    // on every other row sharing one track height.
+    let rows_above = grid.row_heights.total(placement.row);
+    let y = workspace.y + grid.padding + rows_above + placement.row as f64 * grid.gap - scroll;
     let w = placement.column_span as f64 * grid.track_w
         + placement.column_span.saturating_sub(1) as f64 * grid.gap;
-    let h = placement.row_span as f64 * grid.track_h
+    let h = grid.row_heights.total(placement.row + placement.row_span as u16)
+        - rows_above
         + placement.row_span.saturating_sub(1) as f64 * grid.gap;
 
     (
@@ -277,7 +323,7 @@ fn projected_content_height<K: PanelKey>(
         (Mode::Floating, _) => floating_content_height(&snapshot.panels, order),
         (Mode::Tiling, Some(grid)) => {
             grid.padding * 2.0
-                + grid.rows as f64 * grid.track_h
+                + grid.row_heights.total(grid.rows)
                 + grid.rows.saturating_sub(1) as f64 * grid.gap
         }
         (Mode::Tiling, None) => workspace.h,
@@ -784,7 +830,6 @@ mod tests {
             },
         );
         let workspace = Region::new(0.0, 0.0, 1200.0, 900.0);
-
         for case in cases {
             let mut layout = LayoutBuilder::new();
             let kinds = [
@@ -840,5 +885,121 @@ mod tests {
                 case.name
             );
         }
+    }
+
+    /// Growing one panel's `row_span` must not move or resize any panel in a
+    /// different row.
+    ///
+    /// The old projector computed ONE `track_h = max(natural, usable_h / rows)`.
+    /// Raising a panel's `row_span` raises `rows`, which lowers
+    /// `usable_h / rows`, which lowered `track_h` — so resizing one tile
+    /// silently shrank every other tile. Concretely, on a 1400x900 band with
+    /// 1px gap and padding and 150px natural rows, three stacked 1-row tiles
+    /// projected 298.667px rows; growing the last tile to `row_span: 2` made
+    /// it 223.75px for ALL of them.
+    #[test]
+    fn resizing_one_panel_leaves_panels_in_other_rows_untouched() {
+        let workspace = Region::new(0.0, 0.0, 1400.0, 900.0);
+        let surface = SurfaceProfile::from_logical_width(
+            1400.0,
+            crate::WEB_COMPACT_MAX,
+            crate::WEB_TABLET_MAX,
+            SurfaceCapabilities {
+                coarse_pointer: false,
+                hover: true,
+                keyboard: true,
+            },
+        );
+        let kinds = [TestPanel::One, TestPanel::Two, TestPanel::Three];
+
+        // Project a three-tile single column, then the same layout with the
+        // LAST tile grown to span two rows. Growing the last tile is the
+        // trigger: the row count goes 3 -> 4, and the row it sits in is last,
+        // so no other panel has any reason to move.
+        let project = |spans: &[(u8, u8)]| {
+            let mut layout = LayoutBuilder::new();
+            let panels = spans
+                .iter()
+                .enumerate()
+                .map(|(index, &(w, h))| {
+                    layout
+                        .at(kinds[index], 0.0, 0.0, 20.0, 10.0)
+                        .with_tile(w, h)
+                })
+                .collect::<Vec<_>>();
+            let snapshot = Snapshot::from_defaults(
+                panels,
+                Mode::Tiling,
+                Viewport {
+                    width: workspace.w,
+                    height: workspace.h,
+                    units: Units::CssPx,
+                },
+            );
+            let mut metrics = TileLayoutMetrics::from_tile_metrics(TileMetrics::WEB, surface);
+            metrics.columns = 1;
+            // The invariant under test is row independence, not viewport
+            // filling; slack sharing is a separate contract.
+            metrics.fill_viewport = false;
+            let mut scratch = ProjectionBuffer::with_panel_capacity(snapshot.panels.len());
+            let grid = project_tiles(&snapshot, workspace, &metrics, &mut scratch);
+            let regions = scratch
+                .tile_rows
+                .iter()
+                .map(|placement| {
+                    let region = tile_region(workspace, grid, *placement, 0.0).0;
+                    (region.x, region.y, region.w, region.h)
+                })
+                .collect::<Vec<_>>();
+            (grid, regions)
+        };
+
+        let (before, before_regions) = project(&[(1, 1), (1, 1), (1, 1)]);
+        let (after, after_regions) = project(&[(1, 1), (1, 1), (1, 2)]);
+
+        assert_eq!(before.rows, 3, "three one-row tiles need three rows");
+        assert_eq!(
+            after.rows, 4,
+            "growing the last tile's row_span must add a row — this is the \
+             trigger that used to shrink every other row"
+        );
+
+        // Rows stay uniform at the natural height. A panel whose row_span
+        // grows does NOT make its anchor row taller - it simply covers more
+        // rows - so every other row keeps its height and its offset. This is
+        // the invariant: row height must not depend on the row COUNT.
+        assert_eq!(before.row_heights.get(0), before.row_heights.get(2));
+        assert_eq!(
+            after.row_heights.get(0),
+            after.row_heights.get(1),
+            "untouched rows still match each other"
+        );
+        assert_eq!(
+            after.row_heights.get(0),
+            before.row_heights.get(0),
+            "adding a row must not resize the rows that already existed"
+        );
+
+        // The real payoff: panels outside the grown panel's row keep their
+        // exact geometry, even though the grid gained a row.
+        assert_eq!(
+            &before_regions[..2],
+            &after_regions[..2],
+            "panels in earlier rows must be byte-identical after the resize"
+        );
+
+        // The invariant: every panel NOT in the resized panel's row keeps an
+        // identical region. Under the old single `track_h` all three of these
+        // changed from 298.667px tall to 223.75px tall.
+        for index in 0..2 {
+            assert_eq!(
+                after_regions[index], before_regions[index],
+                "panel {index} sits above the resized row and must not move"
+            );
+        }
+        assert_ne!(
+            after_regions[2], before_regions[2],
+            "the resized panel itself must actually change"
+        );
     }
 }

@@ -3,7 +3,7 @@ mod support;
 
 use panel_kit_core::frame::{
     project_dock_into, project_panel, ChromeProjectionInput, PanelProjectionInput, Placement,
-    ProjectionBuffer, TileGridProjection,
+    ProjectionBuffer, RowHeights, TileGridProjection, MAX_TILE_ROWS,
 };
 use panel_kit_core::reducer::{HitTarget, PanelPart, Snapshot, Viewport};
 use panel_kit_core::{
@@ -328,11 +328,13 @@ fn panels_extending_below_or_outside_frame_area_never_panic() {
 
 #[test]
 fn web_and_tui_use_same_tile_grid_projection() {
-    let grid = TileGridProjection {
+    // Uniform tracks: the row offset is still the sum of the rows above it,
+    // and with equal rows that is `row * track_h`.
+    let uniform = TileGridProjection {
         columns: 4,
         rows: 3,
         track_w: 5.0,
-        track_h: 2.0,
+        row_heights: RowHeights([2.0; MAX_TILE_ROWS]),
         gap: 1.0,
         padding: 1.0,
     };
@@ -344,8 +346,42 @@ fn web_and_tui_use_same_tile_grid_projection() {
     };
 
     assert_eq!(
-        widgets::panel::tiled_cell_rect(placement, grid, Rect::new(10, 5, 30, 10), 1.0),
+        widgets::panel::tiled_cell_rect(placement, uniform, Rect::new(10, 5, 30, 10), 1.0),
         Some(Rect::new(17, 11, 11, 2))
+    );
+
+    // Non-uniform tracks: the same placement must land lower, because row 1
+    // is taller than row 0. A shared track height could not express this.
+    let mut heights = [1.0; MAX_TILE_ROWS];
+    heights[1] = 2.0;
+    heights[2] = 4.0;
+    let non_uniform = TileGridProjection {
+        columns: 4,
+        rows: 3,
+        track_w: 5.0,
+        row_heights: RowHeights(heights),
+        gap: 1.0,
+        padding: 1.0,
+    };
+    assert_eq!(
+        widgets::panel::tiled_cell_rect(placement, non_uniform, Rect::new(10, 5, 30, 10), 1.0),
+        Some(Rect::new(17, 10, 11, 4))
+    );
+    // A panel on row 0 sits directly under the padding, unaffected by the
+    // taller rows below it.
+    assert_eq!(
+        widgets::panel::tiled_cell_rect(
+            Placement::Tiled {
+                column: 0,
+                row: 0,
+                column_span: 1,
+                row_span: 1,
+            },
+            non_uniform,
+            Rect::new(10, 5, 30, 10),
+            1.0,
+        ),
+        Some(Rect::new(11, 5, 5, 1))
     );
 }
 
