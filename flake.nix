@@ -16,18 +16,10 @@
 
   outputs = { self, nixpkgs, nixpkgs-dioxus, flake-utils, crane, rust-overlay }:
     let
-      # Systems the Schrodinger Hydra farm can actually build. Deliberately a
-      # subset of eachDefaultSystem: the farm has no x86_64-darwin machine, and
-      # a job with no capable builder is not "pending", it is permanently red
-      # (Hydra reports it as unsupported(9)).
-      #
-      # aarch64-linux is omitted for a different reason — the only builder is a
-      # 1-job GCP VM, and this crate cross-compiles to wasm32 so its output does
-      # not vary by host anyway. x86_64-linux carries the farm's capacity;
-      # aarch64-darwin is kept because that is what developers here build on, so
-      # a toolchain break on macOS should turn CI red rather than surface as a
-      # local surprise.
-      hydraSystems = [ "x86_64-linux" "aarch64-darwin" ];
+      # Packages/devShells remain on eachDefaultSystem for native consumers.
+      # The deployed Hydra and Buildbot pools are x86_64-linux; checks and
+      # Hydra jobs use only that supported worker architecture.
+      hydraSystems = [ "x86_64-linux" ];
 
       perSystem = flake-utils.lib.eachDefaultSystem (system:
       let
@@ -459,7 +451,9 @@
         });
       });
     in
-    perSystem // {
+    perSystem
+    // {
+      checks = nixpkgs.lib.genAttrs [ "x86_64-linux" ] (system: perSystem.checks.${system});
       # What Hydra builds. Hydra's flake jobsets evaluate the `hydraJobs`
       # output specifically — `checks` alone is invisible to it — so this
       # re-exports the current check set per buildable system. Job names come
