@@ -3,13 +3,13 @@
 Generic Dioxus panel-workspace library. Every view is a panel you can
 move/resize/minimize/maximize, with floating (free placement) and tiling
 (auto grid) workspace modes, printer-CMY operation lights, pointer and
-keyboard window management, tiling drag-to-reorder, a minimized-panel dock,
+keyboard window management, tiling drag-to-swap (lift, follow, settle), a minimized-panel dock,
 and versioned layout persistence. Includes reusable badge, spinner, dropdown,
-cascade, and interactive-table widgets; panel-header actions and
+cascade, form-control, and interactive-table widgets; panel-header actions and
 loading-workspace primitives; Grafana and lightweight IDE panels; retained-DOM
 keepalive composition; an optional Bevy canvas bridge; and a Monaco-based code
-editor (`editor::MonacoEditor`) with a `.pest` grammar language and a
-token-matched dark theme.
+editor (`editor::MonacoEditor`) with `nix`, `.pest`, and `toml` languages, a
+`cmd/ctrl+enter` submit action, and a token-matched dark theme.
 
 Factored out of [jump-cannon](https://github.com/ocasazza/jump-cannon) and
 apple-notes-ocr-flow, which both consume it as a git dependency:
@@ -26,7 +26,7 @@ layer:
 
 - **`panel-kit-core`** (`crates/panel-kit-core`) — the renderer-agnostic
   state machine: `PanelWin`, `WinState`, `Mode`, `SurfaceProfile`, keyboard
-  commands, drag/resize/reorder math, viewport clamping, and the versioned
+  commands, drag/resize and tile lift-and-swap math, viewport clamping, and the versioned
   `SavedLayoutV2` persistence shape. Units are abstract (CSS px on the web,
   cells in a terminal).
 - **`panel-kit`** (repo root) — the Dioxus web shell: signals, pointer and
@@ -35,9 +35,11 @@ layer:
 - **`panel-kit-tui`** (`crates/panel-kit-tui`) — the ratatui shell: the same
   workspace drawn in terminal cells with crossterm input, printer-CMY
   controls, a dock line, and JSON-file persistence. Try it:
-  `cargo run -p panel-kit-tui --example workspace`. Via
+  `cargo run -p panel-kit --features spec-plan --example workspace_tui`. Via
   [ratzilla](https://github.com/orhun/ratzilla) this renderer can also
-  target the browser DOM — one panel codebase, web and terminal skins.
+  target the browser DOM — one panel codebase, web and terminal skins. Its
+  demos live in the root `examples/`: `workspace_tui`, `workspace_browser_tui`,
+  `trio_tui`, `trio_browser_tui`.
 - **`panel-kit-grammar`** (`crates/panel-kit-grammar`) — topos and grammar
   abstractions. A *grammar* is a declarative import package (`pest` runtime
   grammar with a capture map, or `json` pointers) that turns input into a
@@ -141,6 +143,16 @@ focused panel, Shift+arrows resize, and Alt+arrows fine-move. `m`, `f`, `t`,
 and Escape minimize, maximize, toggle mode, and restore; Tab and Shift+Tab
 cycle focus, while Enter raises. Bare shortcuts are ignored while a text input
 owns focus.
+
+### Cell-authored specs on pixel hosts
+
+A `WorkspaceSpec` authored in `Units::Cells` renders natively in the terminal.
+Pixel hosts (web, Bevy) call `ResolvedWorkspace::into_logical_px(width,
+height)` once after `resolve`: the authored viewport maps onto the surface, so
+geometry, clamp, tile metrics, surface thresholds, and keyboard steps scale by
+the cell, while chrome takes the pixel profile
+(`ChromeProjectionInput::full(ChromeMetrics::WEB)`). CSS-px specs pass through
+unchanged.
 
 ### Versioned persistence
 
@@ -272,7 +284,7 @@ dx serve --example workspace --platform web
 
 | example | shows |
 | --- | --- |
-| `workspace` | host-owned `Snapshot` + `ProjectionBuffer` + composable web parts; floating pointer and keyboard move/resize/raise; host-owned move/resize snap toggles in the dock trailing slot; layout reset via store clear plus snapshot replacement; tiling reorder and span resize; viewport clamping; wheel chaining; live surface state; and versioned localStorage persistence |
+| `workspace` | host-owned `Snapshot` + `ProjectionBuffer` + composable web parts; floating pointer and keyboard move/resize/raise; host-owned move/resize snap toggles in the dock trailing slot; layout reset via store clear plus snapshot replacement; tiling lift-and-swap drag and span resize; viewport clamping; wheel chaining; live surface state; versioned localStorage persistence; and the Inputs panel, one core `FormModel` with every control kind (text, password, search, date, text area, number, slider, checkbox, switch, radio, select, button) that the terminal, browser-terminal, and Bevy canaries paint and drive through the same `forms::reduce` |
 | `views` | host-owned named views over one workspace: core `SavedViews`, per-view `LocalStorageLayoutStore` records (`panel_kit_example_views:view:<name>` + the `:views` registry), explicit `SavePolicy`, a composable parts loop, a switcher bar with create/rename/delete, per-view reset, and the legacy single-layout migration copy |
 | `badge` | all ten `BadgeKind`s, every prop (`active`, `with_x`, `with_plus`, `small`, `override_color`, `accent_color`, both `BadgeClickKind`s, `emit_hover`) behind live toggles, an event log proving every `BadgeAction` variant fires, and a `tag_hue` FNV hue-spread row |
 | `dropdown` | grouped searchable single-select with host-owned popup and selected value |
@@ -281,8 +293,9 @@ dx serve --example workspace --platform web
 | `spinner` | `Spinner` with and without `label`, plus a live-editable label |
 | `loading_workspace` | the post-mount `LoadingWorkspace` twin of the static pre-WASM boot contract |
 | `theming` | the documented full-palette retheme path: `:root` variable overrides layered after `panel_kit::CSS`, with three switchable presets |
-| `editor` | `editor::MonacoEditor`: two-way `Signal<String>` binding, `on_change` event log, imperative `EditorHandle` (set/read value, language, read-only, layout), reactive `language`/`read_only` props, the `pest` Monarch tokenizer and minimal `toml` language on real samples |
+| `editor` | `editor::MonacoEditor`: two-way `Signal<String>` binding, `on_change` event log, imperative `EditorHandle` (set/read value, language, read-only, layout), reactive `language`/`read_only` props, the `nix`/`pest`/`toml` Monarch tokenizers, the `on_submit` action, and the minimal `toml` language on real samples |
 | `topos` | two regimes (`topos-agentic`, `topos-membrane`) over one session site parsed by either the `trace-lines` (pest) or `trace-json` grammar, running one shared physics base (`topos-physics`). `t` switches regime (per-topos layout persisted; the Physics panel stays identical, only the UI/UX sheaves change), `g` switches grammar (identical content), `n`/`x` append a valid/malformed line (diagnostic, last good site kept), `r` resets. Each regime carries an active subobject on its per-sort badges: click a Roles/Species badge (web) or `s`/space (terminals) to toggle a sort; switching transports it by `∃f`/`f*` and the status line names the morphism |
+| `trio` | one site — the agent sessions and the OKF knowledge objects, joined by `produces`/`verifies`, parsed by `trace-lines` or `trace-json` — read in three regimes (`topos-agentic`, `topos-membrane`, `topos-okf-catalog`), all of them always available, running one shared physics base (`topos-physics`). `t` switches to the next regime, `g` re-reads the site with the next grammar, `n`/`p` move the selection, `l` re-solves the graph layout, `r` resets the workspace layout. A regime switch keeps the arrangement and recolours it (the tuning is one base pullback, so only the sorts and colours move); a grammar switch re-solves from the positions on screen. No pair is ever refused, so no control is disabled |
 
 `dx build --example <name> --platform web` produces the same app
 statically under `target/dx/<name>/debug/web/public`.
@@ -304,16 +317,50 @@ multi-MB bundle is fetched at runtime, once.
 The ratatui backend also has a browser/WASM canary built with Ratzilla:
 
 ```sh
-trunk serve crates/panel-kit-tui/browser_tui.html \
-  --example browser_tui \
+trunk serve examples/workspace_browser_tui.html \
+  --example workspace_browser_tui \
+  --features spec-plan \
   --address 127.0.0.1 \
   --port 8082
 ```
 
 This example is intentionally comprehensive: workspace chrome, floating and
 tiling interactions, dock restore, badges, action log, spinner, theming,
-scrollable content, time-series chart, and gauges. It is executable
-documentation for the shared core interface.
+scrollable content, time-series chart, gauges, and form inputs. It is
+executable documentation for the shared core interface.
+
+### Visual parity check (web ↔ Bevy)
+
+The web canary is the pixel reference for the Bevy backend.
+`tools/visual-parity` captures both and fails on any difference it cannot
+explain:
+
+```sh
+nix develop -c cargo run -p visual-parity -- check   # exit 0 = parity holds
+```
+
+It renders the Bevy workspace example offscreen (1800×900 logical, scale 2,
+authored layout, no saved layout read or written), builds the Dioxus
+workspace example to wasm, serves it on a loopback port, and captures it in
+headless Chrome at the same size with `prefers-reduced-motion: reduce`, so
+animations rest at a fixed frame on both sides. It then pairs every panel and
+compares frame geometry, border, surface and grip pixels, traffic lights,
+every text run (position, width, line height, size, weight, colour), the
+Nodes data-table toolbar and header, and the Graph panel (host box, each
+node's disc, ink at each edge's midpoint). Tolerances: ±1 px geometry, exact
+sRGB for solid fills, ΔE76 < 2 for anti-aliased samples; there are no
+exemptions. `target/visual-parity/report.md` holds every row and per-panel
+web | Bevy | diff images; `visual-parity compare WEB.png BEVY.png OUT`
+re-compares existing captures.
+
+The comparator's own tests run with the workspace suite. The capture needs a
+GPU and a local Chrome (`PANEL_KIT_CHROME` overrides the lookup), so it is
+not a Nix sandbox check: run it before merging Bevy or web chrome changes.
+
+CI runs the workspace tests and this check on every pull request and push to
+main, on a hosted macOS arm64 runner (`.github/workflows/parity.yml`); the
+`visual-parity` artifact carries `report.md`, `web.png`, `bevy.png` and the
+`*-side.png` images, including when the run fails.
 
 ### Topos demos (web, terminal, browser terminal)
 
@@ -330,7 +377,7 @@ so the active subobject on the per-sort badges transports by the image `∃f` on
 agentic→membrane and the inverse image `f*` on membrane→agentic; the status line
 names the morphism used. Toggle a sort by clicking its badge (web), or `s` to
 move the focus and space to toggle it (terminals). Specs, grammars, and data come
-from Nix (`nix/specs/topos-{agentic,membrane}.nix`, `nix/specs/topos-physics.nix`,
+from Nix (`nix/specs/topos-{agentic,membrane}-subobject.nix`, `nix/specs/topos-physics.nix`,
 `nix/specs/morphism-*.nix`, `nix/grammars/`, `nix/data/`) through
 `PANEL_KIT_TOPOS_A/B`, `PANEL_KIT_TOPOS_PHYSICS`, `PANEL_KIT_MORPHISM`,
 `PANEL_KIT_MORPHISM_A_PHYSICS`, `PANEL_KIT_MORPHISM_B_PHYSICS`,
@@ -357,14 +404,87 @@ because `trace-lines` and `trace-json` present the same site.
 
 ```sh
 dx serve --example topos --platform web                     # web
-nix build .#topos-tui-native && ./result/bin/topos          # terminal
+nix build .#topos-tui-native && ./result/bin/topos_tui        # terminal
 nix build .#topos-browser-tui-wasm                          # browser terminal
 
-# browser terminal dev server, from crates/panel-kit-tui inside `nix develop ..`:
-export PANEL_KIT_TOPOS_A=$(nix build --no-link --print-out-paths ..#topos-agentic-ascii)
-export PANEL_KIT_TOPOS_B=$(nix build --no-link --print-out-paths ..#topos-membrane-ascii)
-trunk serve browser_topos.html --example browser_topos --features spec-plan
+# browser terminal dev server, from the repo root inside `nix develop`:
+export PANEL_KIT_TOPOS_A=$(nix build --no-link --print-out-paths .#topos-agentic-subobject-ascii)
+export PANEL_KIT_TOPOS_B=$(nix build --no-link --print-out-paths .#topos-membrane-subobject-ascii)
+trunk serve examples/topos_browser_tui.html --example topos_browser_tui --features spec-plan
 ```
+
+### Trio demo (web, terminal, browser terminal)
+
+One physics base, two sites, three regimes drive all three hosts. `topos-physics`
+is a regime-neutral base topos whose stalks are the only authored physics
+parameters (repulsion, mass per particle sort; stiffness, rest length per bond
+sort). Each regime carries a geometric morphism `p_R` into the base, so its
+tuning is the inverse image `p_R*` and is identical in every regime that reads
+one site: the Physics panel never moves, and so does the graph's arrangement.
+What moves along a morphism is presentation — the sort, and the colour that
+sort wears.
+
+`topos-agentic` reads the agent traces as planner/coder/reviewer roles and
+memory, `topos-membrane` as the same sessions as self-assembling lipid species,
+and `topos-okf-catalog` reads the OKF knowledge catalog as its normalised types
+and bundles. The three morphisms `f: agentic → membrane`,
+`ψ: okf-catalog → membrane`, and `χ: okf-catalog → agentic` all commute over the
+base, and the triangle holds: `f ∘ χ = ψ`. So a regime reads a site exactly when
+the site's native regime reaches it along one of them — traces in agentic
+(native) and membrane (along `f`); OKF in okf-catalog (native), agentic (along
+`χ`), and membrane (along `ψ`). Traces read in okf-catalog has no morphism, and
+the header offers it disabled, naming the reason, rather than inventing one.
+
+Physics is the invariant, presentation is not: crossing a morphism transports the
+selection by the image `∃` forward and the inverse image `*` back, recolours
+every node by the codomain's sorts without moving it, and names the route in the
+status line. Switching site or grammar brings different objects, so the graph
+re-solves instead. The graph panel is the workspace's declared `graph` external
+component: jump-cannon's WebGPU view when the browser has an adapter, and a
+force solve in panel-kit's own painters (web SVG, terminal braille) over the same
+positions otherwise, so the traces visibly assemble into chains, sheets, tubes,
+and closed membranes on every surface.
+
+Specs, grammars, and data come from Nix (`nix/specs/topos-{agentic,membrane,okf-catalog}.nix`,
+`nix/specs/topos-physics.nix`, `nix/specs/morphism-*.nix`, `nix/grammars/`,
+`nix/data/`) through the `PANEL_KIT_TRIO_*` variables the flake's `trioEnv`
+exports. The base and morphism specs are surface-neutral; `nix develop` exports
+the web set and overrides variables exported before entering it, so terminal
+surfaces set their own trio specs inside the shell.
+
+Every panel is a section over the **active subobject** `U` (the selected sorts):
+`Γ(U, F)` of the subsite `site.restrict_objects(object_sorting, U)`. Toggling or
+transporting `U` re-restricts every table, chart, gauge, meter, assembly and
+physics panel — the per-sort badges are the controls and keep listing all sorts.
+The **Morphism** panel renders `f` against `U` live (per-sort rows plus the
+`∃f`/`∀f`/`f*` summary), and the **Invariants** panel proves, as recomputed
+status rows, that the two grammars present one site, that the physics section is
+regime-invariant, and that it commutes with restriction to `U`.
+
+What to try: click the **Planner** badge so `U = {planner}` — every panel narrows
+to planner sessions. Press `t`: `∃f` widens `U` to `{head}`, and the membrane
+panels now cover the planner **and** reviewer objects f merges into head. Press
+`t` again: `f*` pulls `U` back to `{planner, reviewer}` — the whole fiber, the
+information f could not tell apart. Press `g` to switch grammar: nothing changes,
+because `trace-lines` and `trace-json` present the same site.
+
+```sh
+dx serve --example trio --platform web                     # web
+nix build .#trio-tui-native && ./result/bin/trio_tui        # terminal
+nix build .#trio-browser-tui-wasm                           # browser terminal
+
+# browser terminal dev server, from the repo root inside `nix develop`:
+export PANEL_KIT_TRIO_AGENTIC=$(nix build --no-link --print-out-paths .#topos-agentic-ascii)
+export PANEL_KIT_TRIO_MEMBRANE=$(nix build --no-link --print-out-paths .#topos-membrane-ascii)
+export PANEL_KIT_TRIO_OKF_CATALOG=$(nix build --no-link --print-out-paths .#topos-okf-catalog-ascii)
+trunk serve examples/trio_browser_tui.html --example trio_browser_tui --features spec-plan
+```
+
+`topos-trio-test` runs the trio host façade (`examples/support/trio_host.rs`) over
+the real Nix JSON: every workspace binding of every available (site, regime) pair
+resolves, the refused pair is refused by name, the graph's tuning is invariant
+across a site's regimes while its sorts and colours move, and a selection
+survives the trip along `ψ`.
 
 Note: `Cargo.lock` pins `wasm-bindgen` to the exact version of nixpkgs'
 `wasm-bindgen-cli` (dx refuses to bindgen with a mismatched CLI); keep the

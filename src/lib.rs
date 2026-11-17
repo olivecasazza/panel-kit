@@ -82,7 +82,7 @@
 //!         surface,
 //!         focused: true,
 //!         pointer_dragging: false,
-//!         tile_dragging: false,
+//!         tile_role: panel_kit_core::tile_drag::TileRole::Resting,
 //!         workspace_scroll: 0.0,
 //!         clamp: &Clamp::WEB,
 //!         chrome: &chrome,
@@ -163,9 +163,13 @@
 #![warn(missing_docs)]
 
 #[cfg(feature = "web-runtime")]
+pub mod autoloop_host;
+#[cfg(feature = "web-runtime")]
 pub mod badge;
 #[cfg(feature = "bevy")]
 pub mod bevy;
+#[cfg(feature = "web-runtime")]
+pub mod canary;
 #[cfg(feature = "web-runtime")]
 pub mod editor;
 #[cfg(feature = "web-runtime")]
@@ -181,6 +185,10 @@ pub mod loading;
 #[cfg(feature = "spec-plan")]
 pub mod spec_plan;
 #[cfg(feature = "web-runtime")]
+pub mod section_view;
+#[cfg(feature = "web-runtime")]
+pub mod spec_workspace;
+#[cfg(feature = "web-runtime")]
 pub mod store;
 #[cfg(feature = "web-runtime")]
 pub mod surface;
@@ -188,6 +196,8 @@ pub mod surface;
 pub mod theme;
 #[cfg(feature = "web-runtime")]
 pub mod widgets;
+#[cfg(feature = "web-runtime")]
+pub mod workspace;
 #[cfg(feature = "bevy")]
 pub use bevy::{get_bevy_handle, BevyCanvas, BEVY_CSS};
 
@@ -484,7 +494,12 @@ mod boot_contract_tests {
     fn generated_boot_stylesheet_carries_token_values_not_variables() {
         use panel_kit_core::tokens;
 
-        for token in [tokens::BACKGROUND, tokens::SURFACE, tokens::TEXT, tokens::BORDER] {
+        for token in [
+            tokens::BACKGROUND,
+            tokens::SURFACE,
+            tokens::TEXT,
+            tokens::BORDER,
+        ] {
             assert!(
                 BOOT_CSS.contains(token.hex),
                 "generated BOOT_CSS is missing {} ({})",

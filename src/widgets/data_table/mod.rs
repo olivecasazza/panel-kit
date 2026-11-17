@@ -17,18 +17,19 @@ use panel_kit_core::badge::{
     BadgeAction, BadgeClickKind, BadgeKind, BadgeSpec, BadgeTone, BadgeVariant,
 };
 use panel_kit_core::widgets::data_table::{
-    empty_sentence, ribbon_label, segment_label, tag_letter, tag_slot, tally, BuildOptions,
-    ColumnFilter, ColumnKind, Entry, FilterKind, MoveTarget, OrderKey, Ordered, QueryMode,
-    RibbonMode, ScrollMap, SelectMode, Selectable, SortDir, TableEvent, TableKey, TableQuery,
-    TableState, TagMode, View, ViewMode, DEFAULT_PAGE, NARROW_WIDTH, OVERSCAN,
+    empty_sentence, export_view, ribbon_label, segment_label, tag_letter, tag_slot, tally,
+    BuildOptions, ColumnFilter, ColumnKind, Entry, ExportFormat, FilterKind, MoveTarget, OrderKey,
+    Ordered, QueryMode, RibbonMode, ScrollMap, SelectMode, Selectable, SortDir, TableEvent,
+    TableKey, TableQuery, TableState, TagMode, View, ViewMode, DEFAULT_PAGE, NARROW_WIDTH,
+    OVERSCAN,
 };
 
 use crate::badge::Badge;
 use crate::widgets::button::Button;
 
 pub use panel_kit_core::widgets::data_table::{
-    csv, tsv, write_csv, write_tsv, Align, DataColumnSpec, Density, SortSpec, TableData, TableDataBuilder, TableDefaults,
-    Value,
+    csv, tsv, write_csv, write_tsv, Align, DataColumnSpec, Density, SortSpec, TableData,
+    TableDataBuilder, TableDefaults, Value,
 };
 
 /// The last row order built, and what it was built from.
@@ -383,25 +384,11 @@ pub fn DataTable(
     // The rows an export carries: the selection when there is one, in view
     // order, else every row shown. Cells stream into one buffer.
     let export = {
-        let data = data.clone();
-        let visible_at = visible_at.clone();
-        let view = view.clone();
-        let selection = selection.clone();
-        let heads: Vec<String> = visible.iter().map(|c| c.title.clone()).collect();
+        let (columns, data, view) = (columns.clone(), data.clone(), view.clone());
+        let (current, selection) = (current.clone(), selection.clone());
         move |selected_only: bool, as_csv: bool| {
-            let only = selected_only && !selection.is_empty() && !all_checked;
-            let rows = view
-                .rows
-                .iter()
-                .copied()
-                .filter(|&row| !only || selection.contains(data.id(row)));
-            let mut text = String::new();
-            if as_csv {
-                write_csv(&mut text, &data, &heads, rows, &visible_at);
-            } else {
-                write_tsv(&mut text, &data, &heads, rows, &visible_at);
-            }
-            text
+            let format = if as_csv { ExportFormat::Csv } else { ExportFormat::Tsv };
+            export_view(&columns, &data, &view, &current, &selection, selected_only, format)
         }
     };
     let copy = {
@@ -799,20 +786,22 @@ pub fn DataTable(
                         div { class: "pk-dt-group",
                             label { class: "pk-dt-field",
                                 "group"
-                                select {
-                                    name: "col",
-                                    aria_label: "group rows by",
-                                    onchange: move |e| {
-                                        let value = e.value();
-                                        act.call(TableEvent::Group((!value.is_empty()).then_some(value)));
-                                    },
-                                    option { value: "", selected: current.group_by.is_none(), "none" }
-                                    for column in ordered.iter() {
-                                        option {
-                                            key: "{column.id}",
-                                            value: "{column.id}",
-                                            selected: current.group_by.as_deref() == Some(column.id.as_str()),
-                                            "{column.title}"
+                                span { class: "pk-dt-select",
+                                    select {
+                                        name: "col",
+                                        aria_label: "group rows by",
+                                        onchange: move |e| {
+                                            let value = e.value();
+                                            act.call(TableEvent::Group((!value.is_empty()).then_some(value)));
+                                        },
+                                        option { value: "", selected: current.group_by.is_none(), "none" }
+                                        for column in ordered.iter() {
+                                            option {
+                                                key: "{column.id}",
+                                                value: "{column.id}",
+                                                selected: current.group_by.as_deref() == Some(column.id.as_str()),
+                                                "{column.title}"
+                                            }
                                         }
                                     }
                                 }
@@ -1166,6 +1155,7 @@ pub fn DataTable(
                                             "data-id": "{row_id}",
                                             "data-index": "{index}",
                                             "data-cursor": cursor.then_some("true"),
+                                            "data-ring": (current.ring && cursor).then_some("true"),
                                             aria_rowindex: "{header_rows + index + 1}",
                                             aria_selected: "{is_selected}",
                                             tabindex: tabindex,

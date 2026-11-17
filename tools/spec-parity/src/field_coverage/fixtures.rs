@@ -51,9 +51,11 @@ pub(super) fn reference_spec_value() -> Value {
         },
         "input": {
             "steps": { "coarse": 2.0, "fine": 1.0 },
-            "bindings": [{
-                "chord": { "key": "left", "shift": false, "alt": false, "ctrl": false, "meta": false },
-                "command": { "kind": "move", "dx": -16.0, "dy": 0.0 }
+            "keymaps": [{
+                "spec_version": 1,
+                "id": "reference-vi",
+                "modes": ["normal"],
+                "rules": [{ "keys": "g g", "intent": "nav.first", "modes": null, "enter": null, "label": null, "group": null }]
             }]
         },
         "glyphs": "unicode",
@@ -86,6 +88,26 @@ pub(super) fn reference_spec_value() -> Value {
             "slug": "custom",
             "window": { "x": 1.0, "y": 1.0, "w": 24.0, "h": 8.0, "state": "Floating", "z": 1, "tile_w": 1, "tile_h": 2 },
             "content": { "kind": "custom", "binding": "canary.custom" }
+        }, {
+            "id": "graph",
+            "title": "Graph",
+            "slug": "graph",
+            "window": { "x": 1.0, "y": 1.0, "w": 24.0, "h": 8.0, "state": "Floating", "z": 2, "tile_w": 1, "tile_h": 2 },
+            "content": {
+                "kind": "external",
+                "component": "graph",
+                "source": { "source": "binding", "id": "reference.graph" },
+                "layout": { "algorithm": "dagre", "group_by": "sort", "params": { "rank_sep": 2.0 } }
+            }
+        }],
+        "components": [{
+            "id": "graph",
+            "contract": "graph",
+            "requires": ["webgpu"],
+            "keep_mounted": true,
+            "min_size": [320.0, 240.0],
+            "events": ["select", "hover"],
+            "fallback": "cells"
         }]
     })
 }

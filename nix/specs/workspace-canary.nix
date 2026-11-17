@@ -23,7 +23,7 @@ mkWorkspaceSpec {
 
   layout = {
     units = "Cells";
-    viewport = [ 128.0 52.0 ];
+    viewport = [ 160.0 52.0 ];
     preferred_mode = "Floating";
     clamp = {
       outer_w = 0.0;
@@ -72,18 +72,15 @@ mkWorkspaceSpec {
 
   input = {
     steps = { coarse = 2.0; fine = 1.0; };
-    bindings = [
+    keymaps = [
       {
-        chord = { key = "left"; shift = false; alt = false; ctrl = false; meta = false; };
-        command = { kind = "move"; dx = -16.0; dy = 0.0; };
-      }
-      {
-        chord = { key = "right"; shift = true; alt = false; ctrl = false; meta = false; };
-        command = { kind = "resize"; dw = 16.0; dh = 0.0; };
-      }
-      {
-        chord = { key = { char = "m"; }; shift = false; alt = false; ctrl = false; meta = false; };
-        command = { kind = "toggle_mode"; };
+        spec_version = 1;
+        id = "workspace-canary-vi";
+        modes = [ "normal" ];
+        rules = [
+          { keys = "g g"; intent = "nav.first"; modes = null; enter = null; label = null; group = null; }
+          { keys = "<c-o>"; intent = "nav.jumplist -1"; modes = null; enter = null; label = null; group = null; }
+        ];
       }
     ];
   };
@@ -100,19 +97,23 @@ mkWorkspaceSpec {
 
   panels = [
     (panel "Workspace" "Workspace" "workspace"
-      (window 1.0 0.0 62.0 11.0 1 1 2)
+      (window 1.0 0.0 62.0 8.0 1 1 2)
       { kind = "custom"; binding = "canary.workspace"; })
 
     (panel "Activity" "Activity" "activity"
-      (window 1.0 12.0 62.0 14.0 2 1 3)
+      (window 1.0 9.0 62.0 12.0 2 1 3)
       { kind = "time_series"; source = bindingSource "canary.activity"; unit = "ms"; })
 
     (panel "Flame" "Flame" "flame"
-      (window 1.0 27.0 62.0 11.0 3 1 3)
+      (window 1.0 22.0 62.0 10.0 3 1 3)
       { kind = "flamegraph"; source = bindingSource "canary.flame"; })
 
+    (panel "Graph" "Graph" "graph"
+      (window 1.0 33.0 62.0 10.0 10 1 3)
+      { kind = "external"; component = "graph"; source = bindingSource "canary.graph"; layout = { algorithm = "circle"; group_by = null; params = { }; }; })
+
     (panel "Notes" "Notes" "notes"
-      (window 1.0 39.0 62.0 13.0 4 1 3)
+      (window 1.0 44.0 62.0 8.0 4 1 3)
       { kind = "text"; source = bindingSource "canary.notes"; scroll = "auto"; })
 
     (panel "Badges" "Badges" "badges"
@@ -134,6 +135,24 @@ mkWorkspaceSpec {
     (panel "Theme" "Theme" "theme"
       (window 65.0 43.0 63.0 9.0 9 2 2)
       { kind = "custom"; binding = "canary.theme"; })
+
+    (panel "Inputs" "Inputs" "inputs"
+      (window 129.0 0.0 29.0 34.0 11 1 3)
+      { kind = "form"; source = bindingSource "canary.inputs"; })
+  ];
+
+  # Satisfied on every backend: it requires no capability, so each paints the
+  # graph itself rather than its fallback.
+  components = [
+    {
+      id = "graph";
+      contract = "graph";
+      requires = [ ];
+      keep_mounted = false;
+      min_size = [ 1.0 1.0 ];
+      events = [ ];
+      fallback = "cells";
+    }
   ];
 }
 

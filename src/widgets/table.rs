@@ -1,6 +1,6 @@
 //! The semantic table painted by the one table component.
 //!
-//! A [`TableModel`](panel_kit_core::widgets::table::TableModel) is static data:
+//! A [`TableModel`] is static data:
 //! cells, columns, rows. The interactive table is
 //! [`data_table`](super::data_table); the model converts itself to its rows by
 //! column kind ([`TableModel::data`]) and this module paints each cell with the
@@ -90,7 +90,9 @@ fn paint(cell: &TableCell) -> Element {
                     aria_valuemax: "100",
                     aria_valuenow: "{percent}",
                     aria_label: "{text}",
-                    span { class: "pk-table-meter-fill", style: "width:{percent}%;" }
+                    span { class: "pk-table-meter-track",
+                        span { class: "pk-table-meter-fill", style: "width:{percent}%;" }
+                    }
                     span { class: "pk-table-meter-text", "{text}" }
                 }
             }
@@ -112,6 +114,13 @@ fn ModelTable(
     /// Receives a clicked row's id.
     #[props(default)]
     on_row: Option<EventHandler<String>>,
+    /// Mount only the window of rows the scroller shows.
+    #[props(default)]
+    windowed: bool,
+    /// Declared sort, density, grouping, selection mode, view, cursor and
+    /// ring seed.
+    #[props(default)]
+    defaults: TableDefaults,
 ) -> Element {
     #[cfg(test)]
     RENDERS.with(|count| count.set(count.get() + 1));
@@ -133,9 +142,32 @@ fn ModelTable(
                     .map(paint)
                     .unwrap_or_else(|| rsx! {})
             },
-            defaults: TableDefaults::default(),
+            defaults,
+            windowed,
             storage_key,
             on_row,
+        }
+    }
+}
+
+/// Paint a windowed table that starts keyboard-driven with its cursor on
+/// `cursor`: it mounts only the rows its scroller shows and paints the
+/// cursor ring from the first frame.
+pub fn windowed_table(name: &str, view: TableView<'_>, cursor: &str) -> Element {
+    let model = TableModel {
+        columns: view.columns.to_vec(),
+        rows: view.rows.iter().map(|row| (*row).clone()).collect(),
+    };
+    rsx! {
+        ModelTable {
+            id: dom_id(name),
+            model: Rc::new(model),
+            windowed: true,
+            defaults: TableDefaults {
+                cursor: Some(cursor.to_owned()),
+                ring: true,
+                ..TableDefaults::default()
+            },
         }
     }
 }

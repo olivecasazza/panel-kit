@@ -16,6 +16,22 @@ let
   asFloat = value: value + 0.0;
   mapIndex = f: values: lib.imap0 f values;
   unique = values: lib.unique (builtins.filter (value: value != null) values);
+  enumField = pointer: name: allowed: value:
+    let text = if builtins.isString value then value else die (join pointer name) "expected string";
+    in if lib.elem text allowed then text else die (join pointer name) "unsupported ${name} ${text}";
+  enumList = pointer: name: allowed: value:
+    let entries = if builtins.isList value then value else die pointer "expected a list of ${name} values";
+    in mapIndex (index: entry:
+      let at = join pointer index;
+          text = if builtins.isString entry then entry else die at "expected string";
+      in if lib.elem text allowed then text else die at "unsupported ${name} ${text}"
+    ) entries;
+
+  componentContracts = [ "graph" ];
+  capabilities = [ "webgpu" ];
+  componentEventKinds = [ "select" "hover" ];
+  componentFallbacks = [ "cells" "notice" ];
+  layoutAlgorithms = [ "force" "amphiphile" "circle" "grid" "concentric" "spectral" "dagre" "fcose" "sphere" ];
 
   defaultTheme = {
     colors = {
@@ -33,7 +49,7 @@ let
   };
 
   normalizeWorkspace = spec:
-    let input = allowed "" [ "spec_version" "id" "layout" "surface" "chrome" "input" "glyphs" "theme" "persistence" "panels" ] spec; in {
+    let input = allowed "" [ "spec_version" "id" "layout" "surface" "chrome" "input" "glyphs" "theme" "persistence" "panels" "components" ] spec; in {
       spec_version = require "" input "spec_version";
       id = require "" input "id";
       layout = normalizeLayout "/layout" (require "" input "layout");
@@ -44,6 +60,7 @@ let
       theme = normalizeTheme "/theme" (require "" input "theme");
       persistence = normalizePersistence "/persistence" (require "" input "persistence");
       panels = mapIndex normalizePanel (require "" input "panels");
+      components = mapIndex normalizeComponent (input.components or [ ]);
     };
 
   normalizeLayout = pointer: value:
@@ -78,9 +95,27 @@ let
     }) value;
 
   normalizeInput = pointer: value:
-    let input = allowed pointer [ "steps" "bindings" ] value; in {
+    let input = allowed pointer [ "steps" "keymaps" ] value; in {
       steps = normalizeByFields (join pointer "steps") [ "coarse" "fine" ] asFloat input.steps;
-      bindings = mapIndex (index: binding: normalizeByShape (join (join pointer "bindings") index) [ "chord" "command" ] binding binding) input.bindings;
+      keymaps = mapIndex (index: normalizeKeymap (join (join pointer "keymaps") index)) (require pointer input "keymaps");
+    };
+
+  normalizeKeymap = pointer: value:
+    let input = allowed pointer [ "spec_version" "id" "modes" "rules" ] value; in {
+      spec_version = require pointer input "spec_version";
+      id = require pointer input "id";
+      modes = require pointer input "modes";
+      rules = mapIndex (index: normalizeKeymapRule (join (join pointer "rules") index)) (require pointer input "rules");
+    };
+
+  normalizeKeymapRule = pointer: value:
+    let input = allowed pointer [ "keys" "intent" "modes" "enter" "label" "group" ] value; in {
+      keys = require pointer input "keys";
+      intent = require pointer input "intent";
+      modes = input.modes or null;
+      enter = input.enter or null;
+      label = input.label or null;
+      group = input.group or null;
     };
 
   normalizePersistence = pointer: value:
@@ -145,6 +180,15 @@ let
     else if kind == "spinner" then
       let content = allowed pointer [ "kind" "label" ] input; in
       { inherit kind; label = normalizeDataSource (join pointer "label") normalizeString (require pointer content "label"); }
+    else if kind == "external" then
+      let content = allowed pointer [ "kind" "component" "source" "layout" ] input; in
+      { inherit kind;
+        component = require pointer content "component";
+        source = normalizeDataSource (join pointer "source") normalizeGraph (require pointer content "source");
+        layout = normalizeGraphLayout (join pointer "layout") (require pointer content "layout"); }
+    else if kind == "form" then
+      let content = allowed pointer [ "kind" "source" ] input; in
+      { inherit kind; source = normalizeDataSource (join pointer "source") normalizeForm (require pointer content "source"); }
     else die (join pointer "kind") "unsupported content kind ${toString kind}";
 
   normalizeDataSource = pointer: normalizeValue: value:
@@ -161,6 +205,63 @@ let
     else die (join pointer "source") "expected inline or binding";
 
   normalizeString = _pointer: value: value;
+
+  normalizeComponent = index: value:
+    let
+      pointer = join "/components" index;
+      input = allowed pointer [ "id" "contract" "requires" "keep_mounted" "min_size" "events" "fallback" ] value;
+    in {
+      id = require pointer input "id";
+      contract = enumField (join pointer "contract") "component contract" componentContracts (require pointer input "contract");
+      requires = enumList (join pointer "requires") "capability" capabilities (require pointer input "requires");
+      keep_mounted = require pointer input "keep_mounted";
+      min_size = map asFloat (require pointer input "min_size");
+      events = enumList (join pointer "events") "component event" componentEventKinds (require pointer input "events");
+      fallback = enumField (join pointer "fallback") "component fallback" componentFallbacks (require pointer input "fallback");
+    };
+
+  normalizeGraphLayout = pointer: value:
+    let
+      input = allowed pointer [ "algorithm" "group_by" "params" ] value;
+      groupBy = require pointer input "group_by";
+      params = normalizeByFields (join pointer "params") (builtins.attrNames (require pointer input "params")) asFloat (require pointer input "params");
+    in {
+      algorithm = enumField (join pointer "algorithm") "layout algorithm" layoutAlgorithms (require pointer input "algorithm");
+      group_by = if groupBy == null then null else groupBy;
+      params = normalizeByFields (join pointer "params") (builtins.attrNames (require pointer input "params")) asFloat (require pointer input "params");
+    };
+
+  normalizeGraph = pointer: value:
+    let input = allowed pointer [ "nodes" "edges" ] value; in {
+      nodes = mapIndex (index: normalizeGraphNode (join (join pointer "nodes") index)) (require pointer input "nodes");
+      edges = mapIndex (index: normalizeGraphEdge (join (join pointer "edges") index)) (require pointer input "edges");
+    };
+
+  normalizeGraphNode = pointer: value:
+    let
+      fields = [ "id" "label" "sort" "color" "size" "mass" "repulsion" ];
+      input = allowed pointer fields value;
+    in {
+      id = require pointer input "id";
+      label = require pointer input "label";
+      sort = require pointer input "sort";
+      color = require pointer input "color";
+      size = asFloat (require pointer input "size");
+      mass = asFloat (require pointer input "mass");
+      repulsion = asFloat (require pointer input "repulsion");
+    };
+
+  normalizeGraphEdge = pointer: value:
+    let
+      fields = [ "source" "target" "kind" "weight" "rest_length" ];
+      input = allowed pointer fields value;
+    in {
+      source = require pointer input "source";
+      target = require pointer input "target";
+      kind = require pointer input "kind";
+      weight = asFloat (require pointer input "weight");
+      rest_length = asFloat (require pointer input "rest_length");
+    };
   normalizeText = pointer: value: normalizeByShape pointer [ "text" ] value value;
   normalizeBadges = pointer: items: mapIndex (index: normalizeBadge (join pointer index)) items;
   normalizeBadge = pointer: value:
@@ -188,6 +289,7 @@ let
   normalizeBoxList = _pointer: value: value;
   normalizeMeter = _pointer: value: value;
   normalizeStatus = _pointer: value: value;
+  normalizeForm = _pointer: value: value;
 
   normalizeByFields = pointer: names: normalize: value:
     let input = allowed pointer names value; in lib.genAttrs names (name: normalize (require pointer input name));

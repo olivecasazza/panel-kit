@@ -11,9 +11,43 @@ pub mod dock;
 pub mod panel;
 pub mod root;
 
+use panel_kit_core::frame::nearest_tile_slot;
 use panel_kit_core::reducer::{HitTarget, PanelPart};
-use panel_kit_core::PanelKey;
+use panel_kit_core::tile_drag::TileRole;
+use panel_kit_core::{PanelKey, Region};
+use ratatui::buffer::Cell;
 use ratatui::layout::Rect;
+use ratatui::Frame;
+
+/// Caller-owned scratch for [`paint_clipped`]; reuse it across frames.
+#[derive(Debug, Default)]
+pub struct ClipScratch {
+    cells: Vec<Cell>,
+}
+
+/// Run `paint`, then restore every cell outside `clip`, so panels overflowing a
+/// scrolled workspace never draw over the header, dock, or root border.
+pub fn paint_clipped<R>(
+    frame: &mut Frame,
+    clip: Rect,
+    scratch: &mut ClipScratch,
+    paint: impl FnOnce(&mut Frame) -> R,
+) -> R {
+    let area = frame.buffer_mut().area;
+    let clip = clip.intersection(area);
+    scratch.cells.clear();
+    let buffer = frame.buffer_mut();
+    for position in area.positions().filter(|position| !clip.contains(*position)) {
+        scratch.cells.push(buffer[position].clone());
+    }
+    let result = paint(frame);
+    let buffer = frame.buffer_mut();
+    let outside = area.positions().filter(|position| !clip.contains(*position));
+    for (position, cell) in outside.zip(scratch.cells.drain(..)) {
+        buffer[position] = cell;
+    }
+    result
+}
 
 /// Reusable, caller-owned storage for TUI hit regions recorded by parts.
 ///
@@ -49,8 +83,53 @@ impl<K: PanelKey> TuiHitBuffer<K> {
             .reserve(dock_capacity.saturating_sub(self.docks.capacity()));
     }
 
+    /// Clip every recorded panel region to `clip`; parts scrolled outside the
+    /// workspace stop answering hits.
+    pub fn clip_panels(&mut self, clip: Rect) {
+        for panel in &mut self.panels {
+            for region in [
+                &mut panel.outer,
+                &mut panel.body,
+                &mut panel.header,
+                &mut panel.mode,
+                &mut panel.minimize,
+                &mut panel.maximize,
+                &mut panel.resize,
+            ] {
+                *region = region.and_then(|rect| visible_rect(rect.intersection(clip)));
+            }
+        }
+    }
+
     /// Resolve a terminal-cell point against recorded dock, control, header, and body hits.
+    ///
+    /// While a recorded tile is held or lifted, every point resolves to the
+    /// nearest resting tile slot instead, matching core's
+    /// [`hit_test`](panel_kit_core::frame::hit_test).
     pub fn hit_test(&self, point: (f64, f64)) -> Option<HitTarget<K>> {
+        if self
+            .panels
+            .iter()
+            .any(|panel| panel.tile_role.tracks_pointer())
+        {
+            let slots = self.panels.iter().filter_map(|panel| {
+                let slot = panel.slot?;
+                Some((
+                    panel.key,
+                    Region::new(
+                        f64::from(slot.x),
+                        f64::from(slot.y),
+                        f64::from(slot.width),
+                        f64::from(slot.height),
+                    ),
+                ))
+            });
+            return nearest_tile_slot(slots, point).map(|key| HitTarget::Panel {
+                key,
+                part: PanelPart::Surface,
+            });
+        }
+
         for dock in self.docks.iter().rev() {
             if contains(dock.region, point) {
                 return Some(HitTarget::Dock { key: dock.key });
@@ -82,6 +161,18 @@ impl<K: PanelKey> TuiHitBuffer<K> {
 
     pub(crate) fn record_panel_header(&mut self, key: K, source_index: usize, header: Rect) {
         self.panel_hit_mut(key, source_index).header = visible_rect(header);
+    }
+
+    pub(crate) fn record_panel_slot(
+        &mut self,
+        key: K,
+        source_index: usize,
+        slot: Rect,
+        tile_role: TileRole,
+    ) {
+        let hit = self.panel_hit_mut(key, source_index);
+        hit.slot = visible_rect(slot);
+        hit.tile_role = tile_role;
     }
 
     pub(crate) fn record_panel_part(
@@ -128,6 +219,8 @@ struct TuiPanelHit<K: PanelKey> {
     minimize: Option<Rect>,
     maximize: Option<Rect>,
     resize: Option<Rect>,
+    slot: Option<Rect>,
+    tile_role: TileRole,
 }
 
 impl<K: PanelKey> TuiPanelHit<K> {
@@ -142,6 +235,8 @@ impl<K: PanelKey> TuiPanelHit<K> {
             minimize: None,
             maximize: None,
             resize: None,
+            slot: None,
+            tile_role: TileRole::Resting,
         }
     }
 

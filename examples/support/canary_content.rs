@@ -1,0 +1,616 @@
+//! Backend-neutral content for the workspace canary.
+//!
+//! `nix/specs/workspace-canary.nix` owns panel identity, geometry, and chrome;
+//! this module owns the data behind its `canary.*` bindings. Every backend
+//! canary (web, TUI, browser TUI, Bevy) includes it with `#[path]` and paints
+//! the same models, and `tools/spec-parity` compares [`provider_manifest`]
+//! against the Nix spec. Depends only on `panel-kit-core`.
+
+use panel_kit_core::badge::{tag_hue, BadgeKind, BadgeSpec};
+use panel_kit_core::spec::{BackendKind, BindingManifest, ContentKind, PanelProviderDeclaration};
+use panel_kit_core::theme::{ERROR, SUCCESS};
+use panel_kit_core::widgets::badge::hue_color;
+use panel_kit_core::widgets::charts::{five_num, BoxItemView, FlameSpanModel, GaugeModel, SeriesView};
+use panel_kit_core::widgets::data_table::{ColumnKind, TableDefaults, TableState};
+use panel_kit_core::widgets::graph::{GraphEdge, GraphModel, GraphNode};
+use panel_kit_core::widgets::forms::{ChoiceModel, ControlModel, FieldModel, FormModel, TextEntry};
+use panel_kit_core::widgets::table::{
+    ColumnWidth, TableCell, TableColumn, TableModel, TableRow, TextAlign,
+};
+
+/// Executable provider declarations for the canary on `backend`.
+pub fn provider_manifest(backend: BackendKind) -> BindingManifest {
+    BindingManifest {
+        backend,
+        panels: CANARY_PROVIDERS
+            .iter()
+            .copied()
+            .map(provider_declaration)
+            .collect(),
+    }
+}
+
+fn provider_declaration(
+    (panel_id, content_kind, binding): (&str, ContentKind, &str),
+) -> PanelProviderDeclaration {
+    PanelProviderDeclaration {
+        panel_id: panel_id.to_owned(),
+        content_kind,
+        binding: Some(binding.to_owned()),
+    }
+}
+
+/// `(panel id, content kind, binding id)` for every canary panel.
+pub const CANARY_PROVIDERS: [(&str, ContentKind, &str); 11] = [
+    ("Workspace", ContentKind::Custom, "canary.workspace"),
+    ("Activity", ContentKind::TimeSeries, "canary.activity"),
+    ("Flame", ContentKind::Flamegraph, "canary.flame"),
+    ("Graph", ContentKind::External, "canary.graph"),
+    ("Notes", ContentKind::Text, "canary.notes"),
+    ("Badges", ContentKind::Badges, "canary.badges"),
+    ("Nodes", ContentKind::Table, "canary.nodes"),
+    ("Capacity", ContentKind::Gauges, "canary.capacity"),
+    ("Distribution", ContentKind::Boxplot, "canary.distribution"),
+    ("Theme", ContentKind::Custom, "canary.theme"),
+    ("Inputs", ContentKind::Form, "canary.inputs"),
+];
+
+/// The Inputs panel's form: one field per control kind, a disabled field,
+/// and a select with nothing chosen. Every host seeds its form from this.
+pub fn canary_inputs() -> FormModel {
+    let field = |id: &str, note: &str, control: ControlModel| FieldModel {
+        id: id.into(),
+        label: id.into(),
+        control,
+        disabled: false,
+        note: note.into(),
+    };
+    let text = |value: &str, placeholder: &str, entry: TextEntry| ControlModel::Text {
+        value: value.into(),
+        placeholder: placeholder.into(),
+        entry,
+    };
+    let choices = |items: &[(&str, &str)]| -> Vec<ChoiceModel> {
+        items
+            .iter()
+            .map(|(value, label)| ChoiceModel {
+                value: (*value).into(),
+                label: (*label).into(),
+            })
+            .collect()
+    };
+    FormModel {
+        fields: vec![
+            field("host", "", text("pdx-01", "hostname", TextEntry::Plain)),
+            field("token", "", text("hunter2", "", TextEntry::Password)),
+            field("filter", "", text("", "label or tag", TextEntry::Search)),
+            field("since", "", text("2026-11-01", "yyyy-mm-dd", TextEntry::Date)),
+            field(
+                "notes",
+                "",
+                ControlModel::TextArea {
+                    value: "drain before\nthe upgrade".into(),
+                    placeholder: "why".into(),
+                    rows: 2,
+                },
+            ),
+            field(
+                "replicas",
+                "pods",
+                ControlModel::Number { value: 3.0, min: 1.0, max: 8.0, step: 1.0 },
+            ),
+            field(
+                "threshold",
+                "%",
+                ControlModel::Slider { value: 60.0, min: 0.0, max: 100.0, step: 5.0 },
+            ),
+            field("drain", "", ControlModel::Checkbox { checked: true }),
+            field("alerts", "", ControlModel::Switch { on: false }),
+            field(
+                "tier",
+                "",
+                ControlModel::Radio {
+                    value: "warm".into(),
+                    options: choices(&[("hot", "hot"), ("warm", "warm"), ("cold", "cold")]),
+                },
+            ),
+            field(
+                "region",
+                "",
+                ControlModel::Select {
+                    value: String::new(),
+                    placeholder: "choose region".into(),
+                    options: choices(&[
+                        ("pdx", "Portland"),
+                        ("iad", "Ashburn"),
+                        ("fra", "Frankfurt"),
+                        ("nrt", "Tokyo"),
+                    ]),
+                },
+            ),
+            FieldModel {
+                disabled: true,
+                ..field("owner", "locked", text("platform", "", TextEntry::Plain))
+            },
+            FieldModel {
+                label: String::new(),
+                ..field("apply", "", ControlModel::Button { text: "apply".into() })
+            },
+        ],
+    }
+}
+
+/// The Graph panel's model: six services with one oversized node (past the
+/// radius clamp) and a chord across the ring. The spec's layout (`circle`)
+/// positions it identically on every backend.
+pub fn canary_graph() -> GraphModel {
+    let node = |id: &str, sort: &str, color: (u8, u8, u8), size: f32| GraphNode {
+        id: id.into(),
+        label: id.into(),
+        sort: sort.into(),
+        color,
+        size,
+        mass: 1.0,
+        repulsion: 1.0,
+        species: String::new(),
+    };
+    let edge = |source: u32, target: u32| GraphEdge {
+        source,
+        target,
+        kind: "feeds".into(),
+        weight: 1.0,
+        rest_length: 60.0,
+    };
+    GraphModel {
+        nodes: vec![
+            node("ingest", "source", (59, 155, 255), 4.0),
+            node("parse", "stage", (94, 243, 140), 3.0),
+            node("index", "stage", (94, 243, 140), 12.0),
+            node("search", "stage", (255, 189, 46), 5.0),
+            node("cache", "store", (255, 95, 195), 2.0),
+            node("api", "sink", (131, 183, 204), 6.0),
+        ],
+        edges: vec![edge(0, 1), edge(1, 2), edge(2, 3), edge(3, 4), edge(4, 5), edge(5, 0), edge(2, 5)],
+    }
+}
+
+/// The row every canary starts its Nodes table keyboard-driven on, so the
+/// cursor ring paints from the first frame on every backend.
+pub const NODES_CURSOR: &str = "pdx-01 *";
+
+/// The Nodes table's state, seeded identically on every host: keyboard-driven
+/// from the first frame with the cursor on [`NODES_CURSOR`].
+pub fn node_table_state() -> TableState {
+    TableState::new(
+        &[],
+        TableDefaults {
+            cursor: Some(NODES_CURSOR.to_owned()),
+            ring: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Rows for the Nodes table: status, load meter, and detail cells.
+pub fn node_rows() -> TableModel {
+    TableModel {
+        columns: vec![
+            TableColumn {
+                key: "node".into(),
+                title: "node".into(),
+                width: ColumnWidth::Fixed { value: 12 },
+                align: TextAlign::Left,
+                kind: ColumnKind::Text,
+            },
+            TableColumn {
+                key: "load".into(),
+                title: "load".into(),
+                width: ColumnWidth::Fixed { value: 10 },
+                align: TextAlign::Left,
+                kind: ColumnKind::Text,
+            },
+            TableColumn {
+                key: "detail".into(),
+                title: String::new(),
+                width: ColumnWidth::Fixed { value: 10 },
+                align: TextAlign::Left,
+                kind: ColumnKind::Text,
+            },
+        ],
+        rows: rows_with_fillers(),
+    }
+}
+
+/// The named hosts plus enough deterministic filler rows that the windowed
+/// Nodes table mounts a window (100 rows against the 80-row default window);
+/// loads and health come from [`noise`].
+fn rows_with_fillers() -> Vec<TableRow> {
+    let mut rows = vec![
+        node_row("pdx-01 *", true, 0.42, "leader", &["canary", "leader", "postgres", "primary", "us-west", "write"]),
+        node_row("pdx-02", true, 0.18, "ready", &["postgres", "us-west"]),
+        node_row("pdx-03", true, 0.71, "busy", &["busy", "us-west"]),
+        node_row("pdx-04", true, 0.35, "ready", &["postgres", "us-west"]),
+        node_row("pdx-05", true, 0.58, "warm", &["us-west", "warm"]),
+        node_row("pdx-06", true, 0.24, "ready", &["postgres", "us-west"]),
+        node_row("pdx-07", true, 0.83, "hot", &["hot", "us-west"]),
+        node_row("pdx-08", true, 0.12, "draining", &["draining", "spot", "us-west"]),
+        node_row("gfr-01", false, 0.0, "stale", &["eu", "paged", "postgres", "stale", "unhealthy"]),
+        node_row("gfr-02", true, 0.47, "ready", &["eu", "postgres"]),
+        node_row("gfr-03", true, 0.66, "warm", &["eu", "warm"]),
+        node_row("gfr-04", true, 0.29, "ready", &["eu", "postgres"]),
+        node_row("iad-01", true, 0.53, "ready", &["postgres", "us-east"]),
+        node_row("iad-02", false, 0.91, "evicting", &["at-risk", "evicting", "postgres", "spot", "us-east"]),
+        node_row("iad-03", true, 0.38, "ready", &["redis", "us-east"]),
+        node_row("syd-01", true, 0.61, "ready", &["apac", "redis"]),
+        node_row("syd-02", true, 0.27, "catching up", &["apac", "lagging", "redis"]),
+    ];
+    // Filler tags cycle the regions; the last two sets overflow the four
+    // visible segments so more `+N` tails show.
+    const FILLER_TAGS: [&[&str]; 5] = [
+        &["canary", "us-west"],
+        &["eu", "postgres", "spot"],
+        &["apac", "redis", "hot", "noisy", "paged"],
+        &["us-east", "postgres", "canary"],
+        &["sao", "redis", "warm", "draining", "spot", "write"],
+    ];
+    for at in 0..83 {
+        let region = ["sfo", "fra", "sin", "sao"][at % 4];
+        let detail = ["ready", "warm", "busy"][at % 3];
+        rows.push(node_row(
+            &format!("{region}-{at:02}"),
+            noise(at as u64 + 41) > 0.1,
+            noise(at as u64 * 7 + 3),
+            detail,
+            FILLER_TAGS[at % FILLER_TAGS.len()],
+        ));
+    }
+    rows
+}
+
+fn node_row(name: &str, healthy: bool, load: f64, detail: &str, tags: &[&str]) -> TableRow {
+    let color = if healthy { SUCCESS.rgb } else { ERROR.rgb };
+    TableRow {
+        id: name.to_string(),
+        tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+        cells: vec![
+            TableCell::Status {
+                label: name.into(),
+                color,
+            },
+            TableCell::Meter {
+                ratio: load,
+                text: String::new(),
+                color: Some(color),
+            },
+            TableCell::Text(detail.into()),
+        ],
+    }
+}
+
+/// One chip of every badge kind, plus an active status chip.
+pub fn demo_badges() -> Vec<BadgeSpec> {
+    let mut tag = BadgeSpec::new("tag", "browser-tui", BadgeKind::Tag);
+    tag.override_color = Some(hue_color(tag_hue("browser-tui")));
+    let mut active = BadgeSpec::new("status", "canary", BadgeKind::Status);
+    active.active = true;
+    vec![
+        tag,
+        BadgeSpec::new("doctype", "example", BadgeKind::Doctype),
+        BadgeSpec::new("folder", "crates/panel-kit-tui", BadgeKind::Folder),
+        BadgeSpec::new("author", "olive", BadgeKind::Author),
+        BadgeSpec::new(
+            "entity",
+            "panel-kit-core",
+            BadgeKind::Entity {
+                ty: Some("crate".into()),
+            },
+        ),
+        BadgeSpec::new(
+            "link",
+            "WorkspaceSpec",
+            BadgeKind::Wikilink {
+                resolved: true,
+                target: "WorkspaceSpec".into(),
+            },
+        ),
+        BadgeSpec::new(
+            "link",
+            "missing-doc",
+            BadgeKind::Wikilink {
+                resolved: false,
+                target: "missing-doc".into(),
+            },
+        ),
+        BadgeSpec::new(
+            "url",
+            "ratzilla",
+            BadgeKind::Url {
+                href: "https://github.com/ratatui/ratzilla".into(),
+                host: "github.com".into(),
+            },
+        ),
+        BadgeSpec::new("date", "2026-06-13", BadgeKind::Date),
+        active,
+        BadgeSpec::new("mode", "wasm", BadgeKind::Generic),
+    ]
+}
+
+/// Number of points kept in each rolling time-series window.
+pub const WINDOW: usize = 48;
+
+/// Deterministic value in `0.0..1.0` from a counter (hashed LCG), so every
+/// backend animates identically without a `rand` dependency.
+fn noise(seed: u64) -> f64 {
+    let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51afd7ed558ccd);
+    x ^= x >> 33;
+    (x % 10_000) as f64 / 10_000.0
+}
+
+/// Rolling per-frame metrics behind the Activity, Flame, and Distribution
+/// panels. Hosts call [`Metrics::tick`] once per frame.
+pub struct Metrics {
+    /// Rolling `eval/ms` samples as `(x_seconds, ms)`.
+    pub eval: Vec<(f64, f64)>,
+    /// Rolling `frame/ms` samples as `(x_seconds, ms)`.
+    pub frame: Vec<(f64, f64)>,
+    /// Per-stage duration samples for the boxplot, newest last.
+    pub stage_samples: [Vec<f64>; 5],
+    /// Frame counter; also the x-axis clock (0.1 s per tick).
+    n: u64,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Boxplot and flame stage names.
+pub const STAGES: [&str; 5] = ["segment", "markdown", "synthesis", "charts", "assemble"];
+
+impl Metrics {
+    /// Metrics pre-filled with one window of history.
+    pub fn new() -> Self {
+        let mut m = Metrics {
+            eval: Vec::with_capacity(WINDOW),
+            frame: Vec::with_capacity(WINDOW),
+            stage_samples: Default::default(),
+            n: 0,
+        };
+        for _ in 0..WINDOW {
+            m.tick();
+        }
+        m
+    }
+
+    /// Push one sample onto every rolling buffer, dropping the oldest.
+    pub fn tick(&mut self) {
+        let n = self.n;
+        let x = n as f64 * 0.1;
+        // eval/ms: slow sine drift plus jitter, 6..36 ms.
+        let eval = 20.0 + 12.0 * (x * 0.6).sin() + 6.0 * (noise(n) - 0.5);
+        // frame/ms: tight around the 16.6 ms budget with rare spikes.
+        let spike = if noise(n ^ 0xa5) > 0.92 { 9.0 } else { 0.0 };
+        let frame = 16.6 + 1.4 * (x * 1.3).sin() + spike + 1.0 * (noise(n ^ 0x5a) - 0.5);
+        push_window(&mut self.eval, (x, eval.max(1.0)));
+        push_window(&mut self.frame, (x, frame.max(1.0)));
+        let means = [2.4, 5.1, 3.3, 1.8, 0.9];
+        let spreads = [0.8, 2.0, 1.1, 0.6, 0.3];
+        for (s, samples) in self.stage_samples.iter_mut().enumerate() {
+            let v = means[s] + spreads[s] * (noise(n ^ (s as u64 * 0x9e3) ^ 0x1234) - 0.5) * 2.0;
+            if samples.len() >= WINDOW {
+                samples.remove(0);
+            }
+            samples.push(v.max(0.05));
+        }
+        self.n = n.wrapping_add(1);
+    }
+
+    /// The two series for the Activity chart.
+    pub fn series(&self) -> [SeriesView<'_>; 2] {
+        [
+            SeriesView {
+                name: "eval/ms",
+                points: &self.eval,
+            },
+            SeriesView {
+                name: "frame/ms",
+                points: &self.frame,
+            },
+        ]
+    }
+
+    /// Box-and-whisker items, one per pipeline stage.
+    pub fn boxes(&self) -> Vec<BoxItemView<'_>> {
+        self.stage_samples
+            .iter()
+            .enumerate()
+            .filter_map(|(i, samples)| {
+                five_num(samples).map(|summary| BoxItemView {
+                    label: STAGES[i],
+                    summary,
+                    color: None,
+                })
+            })
+            .collect()
+    }
+
+    /// Flame tree: a `session` root over three jobs, each split into the five
+    /// stages, widths driven by the latest per-stage sample.
+    pub fn flame(&self) -> Vec<FlameSpanModel> {
+        let latest = |i: usize| self.stage_samples[i].last().copied().unwrap_or(1.0);
+        let mut spans = Vec::new();
+        let jobs = 3usize;
+        let mut session_total = 0.0;
+        let mut job_spans: Vec<(f64, Vec<f64>)> = Vec::new();
+        for j in 0..jobs {
+            let weights: Vec<f64> = (0..5)
+                .map(|s| latest(s) * (0.6 + 1.2 * noise(self.n ^ (j as u64 * 0x77) ^ s as u64)))
+                .collect();
+            let total: f64 = weights.iter().sum();
+            session_total += total;
+            job_spans.push((total, weights));
+        }
+        spans.push(FlameSpanModel {
+            label: "session".into(),
+            depth: 0,
+            value: session_total,
+            color: None,
+        });
+        for (j, (total, weights)) in job_spans.into_iter().enumerate() {
+            spans.push(FlameSpanModel {
+                label: format!("job-{j}"),
+                depth: 1,
+                value: total,
+                color: None,
+            });
+            for (s, w) in weights.into_iter().enumerate() {
+                spans.push(FlameSpanModel {
+                    label: STAGES[s].into(),
+                    depth: 2,
+                    value: w,
+                    color: None,
+                });
+            }
+        }
+        spans
+    }
+}
+
+fn push_window(buf: &mut Vec<(f64, f64)>, p: (f64, f64)) {
+    if buf.len() >= WINDOW {
+        buf.remove(0);
+    }
+    buf.push(p);
+}
+
+/// The Capacity panel's four gauges.
+pub fn capacity_items() -> [GaugeModel; 4] {
+    [
+        GaugeModel {
+            label: "vfs".into(),
+            ratio: 0.21,
+            text: "31 / 148 files".into(),
+        },
+        GaugeModel {
+            label: "wasm".into(),
+            ratio: 0.63,
+            text: "6.3 MB / 10 MB".into(),
+        },
+        GaugeModel {
+            label: "events".into(),
+            ratio: 0.78,
+            text: "78% queue".into(),
+        },
+        GaugeModel {
+            label: "layout".into(),
+            ratio: 0.94,
+            text: "94% stress".into(),
+        },
+    ]
+}
+
+/// Notes panel content as `(heading, lines)` sections, long enough to
+/// overflow the panel body at the canary's default size so panel scrolling is
+/// observable. Backends paint headings in the text colour, lines muted.
+pub const NOTES: &[(&str, &[&str])] = &[
+    ("docs-as-code canary", &[]),
+    (
+        "what this example is",
+        &[
+            "This example renders one panel-kit backend as executable documentation.",
+            "It exercises spec-authored layout, chrome, input, persistence,",
+            "badges, charts, tables, gauges, text, custom panels, and dock restore.",
+        ],
+    ),
+    (
+        "panel scrolling",
+        &[
+            "Wheel and PgUp/PgDn scroll the panel under the pointer first.",
+            "Content consumes the gesture until its edge, then the gesture bubbles",
+            "to the workspace, matching the web shell's overflow chaining.",
+            "Shift+wheel scrolls sideways; the Nodes table scrolls row-wise",
+            "under a sticky header.",
+        ],
+    ),
+    (
+        "keys",
+        &[
+            "p · palette            m · minimize       f · float",
+            "t · tile               Tab · cycle focus  1-9 · restore",
+            "arrows · move          Shift+arrows · resize",
+            "PgUp/PgDn · page scroll this panel, then the workspace",
+            "q · quit",
+        ],
+    ),
+    (
+        "why it is long",
+        &[
+            "Canary bodies are small, so short text would hide the scrollbar and",
+            "make panel scrolling indistinguishable from workspace scrolling.",
+            "Overflowing text and node rows keep both paths observable.",
+        ],
+    ),
+    (
+        "reading order",
+        &[
+            "1 · project the snapshot into reusable scratch",
+            "2 · draw root, panels, chrome, controls, dock, scrollbars",
+            "3 · paint body content with the panel's scroll offsets",
+            "4 · route wheel gestures through the same offsets",
+            "",
+            "Every step above is a renderer-neutral core calculation or a thin",
+            "backend painter; every backend canary runs the identical sequence.",
+            "",
+            "Scroll this panel with the wheel to confirm the offsets move.",
+        ],
+    ),
+];
+
+/// Heading of the Workspace panel's card.
+pub const WORKSPACE_CARD_HEADING: &str = "Host-owned composition";
+
+/// Body lines of the Workspace panel's card for the panel titled `title`.
+/// `header_actions` counts clicks on the panel's header actions; a backend
+/// without header actions reports 0.
+pub fn workspace_card_lines(title: &str, maximized: bool, header_actions: u32) -> [String; 2] {
+    [
+        format!(
+            "Panel “{title}” was declared by Nix, resolved into SpecPanelId, and projected into panel parts."
+        ),
+        format!("maximized: {maximized} · header actions: {header_actions}"),
+    ]
+}
+
+/// Theme panel swatches: `(semantic slot, caption)`.
+pub const THEME_SWATCHES: [(panel_kit_core::theme::ThemeColor, &str); 3] = [
+    (panel_kit_core::theme::ThemeColor::Primary, "primary · mode light"),
+    (panel_kit_core::theme::ThemeColor::Tertiary, "tertiary · minimize"),
+    (panel_kit_core::theme::ThemeColor::Secondary, "secondary · maximize"),
+];
+
+/// Theme panel heading for the active preset.
+pub fn theme_preset_label(paper: bool) -> &'static str {
+    if paper {
+        "preset: paper (press p)"
+    } else {
+        "preset: spec default (press p)"
+    }
+}
+
+/// [`NOTES`] as one newline-joined block for text painters without per-line
+/// styling: sections separated by a blank line.
+pub fn notes_text() -> String {
+    NOTES
+        .iter()
+        .map(|(heading, body)| {
+            std::iter::once(*heading)
+                .chain(body.iter().copied())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}

@@ -196,6 +196,7 @@
       const e = editors.get(id);
       if (e) {
         e.changeSub?.dispose();
+        e.submitSub?.dispose();
         e.dispose();
         e.getModel()?.dispose();
         editors.delete(id);
@@ -214,6 +215,12 @@
       const e = editor(id);
       const model = e.getModel();
       if (!model || e.getValue() === value) return;
+      // executeEdits is dropped by a read-only editor, and a read-only view
+      // has no cursor to preserve: replace the text directly.
+      if (e.getOption(monaco.editor.EditorOption.readOnly)) {
+        e.setValue(value);
+        return;
+      }
       const selections = e.getSelections();
       e.pushUndoStop();
       e.executeEdits('panel-kit', [{ range: model.getFullModelRange(), text: value }]);
@@ -234,6 +241,10 @@
       editor(id).updateOptions({ readOnly });
     },
 
+    setWordWrap(id, wordWrap) {
+      editor(id).updateOptions({ wordWrap: wordWrap ? 'on' : 'off' });
+    },
+
     layout(id) {
       editor(id).layout();
     },
@@ -247,12 +258,33 @@
       e.changeSub = e.onDidChangeModelContent(() => callback(e.getValue()));
     },
 
+    // ⌘/Ctrl+Enter. Registered as a Monaco action rather than a DOM listener
+    // so it fires while focus is inside any editor widget (suggestions,
+    // find) and never double-fires against the editor's own key handling.
+    onSubmit(id, callback) {
+      const e = editor(id);
+      e.submitSub?.dispose();
+      e.submitSub = e.addAction({
+        id: 'panel-kit.submit',
+        label: 'Submit',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+        run: () => callback(),
+      });
+    },
+
+    // Returns null on success, or the validation error: a grammar Monaco
+    // rejects must not leave the editor creator waiting forever.
     registerLanguage(id, monarch, configuration) {
-      if (!monaco.languages.getLanguages().some((l) => l.id === id)) {
-        monaco.languages.register({ id });
+      try {
+        if (!monaco.languages.getLanguages().some((l) => l.id === id)) {
+          monaco.languages.register({ id });
+        }
+        monaco.languages.setMonarchTokensProvider(id, monarch);
+        if (configuration) monaco.languages.setLanguageConfiguration(id, configuration);
+      } catch (e) {
+        return String(e);
       }
-      monaco.languages.setMonarchTokensProvider(id, monarch);
-      if (configuration) monaco.languages.setLanguageConfiguration(id, configuration);
+      return null;
     },
 
     defineTheme(name, tokens) {

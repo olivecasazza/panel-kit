@@ -46,7 +46,7 @@ mkWorkspaceSpec {
   };
   input = {
     steps = { coarse = 2.0; fine = 1.0; };
-    bindings = [ { chord = { key = "left"; shift = false; alt = false; ctrl = false; meta = false; }; command = { kind = "move"; dx = -16.0; dy = 0.0; }; } ];
+    keymaps = [ { spec_version = 1; id = "reference-vi"; modes = [ "normal" ]; rules = [ { keys = "g g"; intent = "nav.first"; modes = null; enter = null; label = null; group = null; } ]; } ];
   };
   glyphs = "unicode";
   theme = defaultTheme;
@@ -64,5 +64,30 @@ mkWorkspaceSpec {
     (panel 9 "meter" "Meter" { kind = "meter"; source = { source = "inline"; value = { label = "memory"; ratio = 0.5; text = "50%"; color = null; }; }; })
     (panel 10 "status" "Status" { kind = "status"; source = { source = "inline"; value = { label = "build"; state = "ok"; color = [ 39 201 63 ]; }; }; })
     (panel 11 "spinner" "Spinner" { kind = "spinner"; label = { source = "inline"; value = "Loading"; }; })
+    (panel 12 "graph" "Graph" {
+      kind = "external"; component = "graph";
+      source = { source = "binding"; id = "reference.graph"; };
+      layout = { algorithm = "dagre"; group_by = "sort"; params = { rank_sep = 2.0; }; };
+    })
+    (panel 13 "form" "Form" {
+      kind = "form";
+      source = {
+        source = "inline";
+        value = {
+          fields = [
+            { id = "host"; label = "host"; disabled = false; note = ""; control = { type = "text"; value = "pdx-01"; placeholder = "hostname"; entry = "plain"; }; }
+            { id = "replicas"; label = "replicas"; disabled = false; note = "pods"; control = { type = "number"; value = 3.0; min = 1.0; max = 8.0; step = 1.0; }; }
+            { id = "region"; label = "region"; disabled = false; note = ""; control = { type = "select"; value = "pdx"; placeholder = "choose"; options = [ { value = "pdx"; label = "Portland"; } ]; }; }
+          ];
+        };
+      };
+    })
+  ];
+  components = [
+    {
+      id = "graph"; contract = "graph"; requires = [ "webgpu" ];
+      keep_mounted = true; min_size = [ 320.0 240.0 ];
+      events = [ "select" "hover" ]; fallback = "cells";
+    }
   ];
 }

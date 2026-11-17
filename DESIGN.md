@@ -230,7 +230,7 @@ the cluster uses a printer-CMY scheme instead. The lights are `.light.mode`
 
 ### Highlight — Live State
 
-- **Highlight** `--color-highlight`: the live-system colour. It appears only where something is *happening or selected right now* — the spinner ring and label, the skeleton pulse, the progress fill, the topbar activity indicator, the active badge halo, and the dashed outline on a panel mid-reorder-drag. Default Phosphor Green `#5ef38c` dark / `#0c7a3d` paper. It is the brightest, most saturated value in the system, which is exactly why it must stay rare.
+- **Highlight** `--color-highlight`: the live-system colour. It appears only where something is *happening or selected right now* — the spinner ring and label, the skeleton pulse, the progress fill, the topbar activity indicator, the active badge halo, and a tile drag in flight: the lifted tile's border and the swap target's dashed outline. Default Phosphor Green `#5ef38c` dark / `#0c7a3d` paper. It is the brightest, most saturated value in the system, which is exactly why it must stay rare.
 
 ### Status roles
 
@@ -440,7 +440,7 @@ not.
 ### Shadow Vocabulary
 
 - **Overlay lift** (`box-shadow: 0 10px 30px` at 80% `--shadow-ink`): the fixed tooltip overlay only. It is genuinely detached and viewport-placed. `--shadow-ink` is the one theme-independent literal black, declared outside the colour namespace and mixed with `color-mix`.
-- **Drag lift** (`box-shadow: 0 6px 24px` at 46.67% `--shadow-ink`): a panel genuinely lifted mid-drag (`.ws.floating .panel.dragging`).
+- **Drag lift** (`box-shadow: 0 6px 24px` at 46.67% `--shadow-ink`): a panel genuinely lifted mid-drag — `.ws.floating .panel.dragging`, and a lifted or landing tile (`.ws.tiling .panel.tile-lifted`, `.tile-landing`), whose offset and blur scale with core's projected elevation (`--pk-lift`).
 
 Note that two further `box-shadow` declarations exist but are **rings, not elevation** — `0 0 0 2px` spreads used for badge hover/active halos. They borrow the shadow channel to draw a state ring. That is legitimate output but mis-housed: rings belong to a `--color-focus-ring` / state role, so that removing elevation never removes state feedback.
 
@@ -455,8 +455,10 @@ not a bigger shadow.
 (`box-shadow: 0 6px 24px #0007`) was removed in 1.0.0: it shadowed every panel
 whether floating, tiled, or docked, and the terminal renderer had no
 counterpart for any of it. Z-order legibility now rides the tonal/border
-channel both renderers can draw, and a shadow appears only on
-`.ws.floating .panel.dragging` — a panel genuinely lifted mid-drag.
+channel both renderers can draw, and a shadow appears only on a panel
+genuinely lifted mid-drag (`.ws.floating .panel.dragging`, `.panel.tile-lifted`,
+`.panel.tile-landing`). The terminal draws the same lift as a thick highlight
+border plus a one-cell shaded drop shadow, so the cue survives in cells.
 
 Two `0 0 0 2px` declarations remain in the shadow channel but are **rings,
 not elevation**: badge hover/active. They draw state, so removing elevation
@@ -473,7 +475,9 @@ draws, so web and terminal chrome are the same shape.
 One shape breaks the rectangle: free-standing badges are full pills
 (`border-radius: 999px`, which at their height is exactly a stadium), inherited
 from the egui badge they port. Inside the data table they take the square chip
-style. The spinner's rotating ring stays circular because it moves.
+style. The spinner's rotating ring stays circular because it moves, and the
+radio mark is round because a round mark is how one-of-N reads apart from a
+checkbox's any-of-N; the terminal draws `( )` against `[ ]` for the same reason.
 Borders do the work that fills would do elsewhere: a badge's *kind* is carried
 by its border color with a near-black fill behind it, so ten badge kinds
 coexist without ten colored blocks fighting for attention. The resize grip is
@@ -488,7 +492,7 @@ edge grey, folded.
 - **Character:** an instrument module bolted into a rack.
 - **Shape:** square corners (`--panel-radius`), `1px` `--color-border` border, `--color-surface` fill, `overflow: hidden`, floors at `180x110px`.
 - **Chrome:** controls and title are inset into the top border row, not a header band. The header's content starts on the body's content column (`--space-md` in); its `--space-xs` padding sits outside that column, where the top border stops. The body compensates with a `1.75rem` top inset.
-- **States:** `.tile-dragging` drops to `.55` opacity with a `1px` dashed highlight outline inset `-1px` — the highlight's live-state role applied to drag.
+- **States:** a tile drag is projected by core (`TileRole`, `lift`): a lifted tile follows the pointer above the plane — highlight border, drag-lift shadow, `1.03` scale and `.88` opacity at full lift — while the swap target takes a `1px` dashed highlight outline inset `-1px` and the other tiles slide toward the previewed swap. Release swaps the two tiles and settles the lifted one into its new slot; Escape, pointer cancel, or leaving the window fly it home. All motion is advanced by host ticks, and reduced motion completes it in one.
 - **Cursor:** `grab` on a tiling panel head, `grabbing` while active; `default` on mobile.
 
 ### Traffic Lights
@@ -513,6 +517,18 @@ edge grey, folded.
 - **Shape:** square, `1px` `--color-border` border, `--color-background` fill, `--color-text-muted` caps label at `11px` with `.06em` tracking.
 - **Hover:** inverts — `--color-text` fill, `--color-inverse-text` label.
 - **Pressed** (`aria-pressed="true"`): highlight border and label; a latched toggle is selection state. Disabled drops the border to `--color-divider`.
+
+### Form Controls
+
+- **Character:** instrument inputs on the same faceplate — a field is a cell you write into, not a card.
+- **Model:** `panel_kit_core::widgets::forms` owns the fields, values, focus, text editing, stepping, and the select popup (`FormModel`, `FormState`, `reduce`). Every renderer paints that model and translates its own events into `FormKey` / `FormHit`; none carries input behaviour of its own. Content kind `form`.
+- **Controls:** text (plain, password, search, e-mail, URL, telephone, date, time), text area, number, slider, checkbox, switch, radio group, select, button. Date and time are typed text (`YYYY-MM-DD`, `HH:MM`), not a native picker: an OS picker cannot be themed or drawn in cells.
+- **Shape:** square, `1px` `--color-border` edge, `--color-background` fill recessed below the panel surface, `1px 6px` padding, body type at `1.4`. Rows are a `88px` key column (the `11px` tracked-caps label in `--color-text-muted`) then the control, `--space-sm` apart. An optional muted note trails the control.
+- **States:** hover brightens the edge to `--color-text`; keyboard focus takes the shared `2px` ring; disabled drops the edge to `--color-divider` and the text to muted. A placeholder is `--color-text-muted`.
+- **Live state:** the highlight marks only what is on or chosen — the checkbox's `8px` lit cell, the switch thumb parked right, the radio dot, the open select's edge and chevron, the highlighted option's edge, the caret. The slider fills to its value in `--color-text`, not the highlight: a level is a reading, not an event.
+- **Select:** the popup is the system's own listbox under the trigger, never the OS menu, so it is the same list on web, terminal, and Bevy. A host that keeps a native `<select>` gives it `.pk-select` for the same closed face and drawn chevron.
+- **Primitives:** `.pk-input`, `.pk-select`, `.pk-check`, `.pk-radio`, `.pk-switch`, `.pk-range` style a host's own native elements; `panel_kit::widgets::Form` paints a whole `FormModel`.
+- **Cells:** a control is a bracketed run, the cell form of the `1px` edge — `[value   ]`, `[■]` / `[ ]`, `(•)` / `( )`, a four-cell switch track with `ON` / `OFF`, `━━■──` for the slider, `[choice ▾]`, `[ CAPTION ]`. The focused field carries `›` before its control and a bold edge; the caret is the character cell on the highlight. The ASCII glyph set draws `[x]`, `(*)`, `==#--`, `v`, `>`.
 
 ### Badges
 

@@ -81,7 +81,8 @@ as "core owns it".
 - Per-panel controls inset into the top border row: mode toggle, minimize,
   maximize/restore.
 - Floating drag-move, corner resize, z-raise on interaction; tiling
-  drag-header reorder.
+  header drag that lifts a tile, follows the pointer, and swaps it into the
+  slot under the pointer.
 - Minimized panels collapse to a dock strip and restore from it.
 - Viewport clamping on resize, with vertical overflow reachable by
   workspace-level scroll and manual scroll chaining into panel bodies.
@@ -123,8 +124,8 @@ the design calls for it, provided the notify-and-pin path is followed.
   panel-kit as a git dependency).
 - Four web examples: `workspace`, `badge`, `spinner`, `theming`
   (`examples/`).
-- Three terminal examples: `workspace`, `workspace_canary`, `browser_tui`
-  (`crates/panel-kit-tui/examples/`).
+- Three terminal examples: `workspace_tui`, `trio_tui`, `workspace_browser_tui`
+  (`examples/`).
 - Incumbent visual system: `assets/panel-kit.css` (186 lines; 15 `:root`
   declarations — 14 colors plus the `--mono` stack — and the panel /
   light / dock / badge / spinner / tooltip / mobile rules) and

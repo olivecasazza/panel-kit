@@ -15,14 +15,23 @@ use crate::persist::SavePolicy;
 use crate::reducer::{ResizePolicy, Snapshot, Viewport};
 use crate::theme::ThemeTokens;
 use crate::widgets::ContentSpec;
+use crate::keymap::{Keymap, KeymapError, KeymapSpec};
 use crate::{
-    ChromeMetrics, Clamp, CommandStep, KeyChord, Mode, PanelCatalog, PanelCommand, PanelMeta,
-    PanelWin, SpecPanelId, SurfaceCapabilities, TileMetrics, Units, WinState, TILE_H_MAX,
-    TILE_W_MAX,
+    ChromeMetrics, Clamp, CommandStep, Mode, PanelCatalog, PanelMeta, PanelWin, SpecPanelId,
+    SurfaceCapabilities, TileMetrics, Units, WinState, TILE_H_MAX, TILE_W_MAX,
 };
+
+mod logical_px;
 
 #[cfg(feature = "spec-json")]
 mod strict;
+
+pub mod component;
+
+pub use component::{
+    Capability, ComponentContract, ComponentEvent, ComponentEventKind, ComponentFallback,
+    ExternalComponentSpec, component_satisfied,
+};
 
 /// Current authored workspace-spec version.
 pub const WORKSPACE_SPEC_VERSION: u32 = 1;
@@ -53,7 +62,7 @@ pub struct WorkspaceSpec {
     pub surface: SurfaceSpec,
     /// Shared chrome toggles and metrics.
     pub chrome: ChromeSpec,
-    /// Keyboard movement steps and bindings.
+    /// Keyboard movement steps and keymap layers.
     pub input: InputSpec,
     /// Glyph family requested by terminal-like backends.
     pub glyphs: Charset,
@@ -63,6 +72,9 @@ pub struct WorkspaceSpec {
     pub persistence: PersistenceSpec,
     /// Authored panels in declaration order.
     pub panels: Vec<PanelSpec>,
+    /// Declared external components; empty when every body is panel-kit's.
+    #[serde(default)]
+    pub components: Vec<ExternalComponentSpec>,
 }
 
 /// Layout defaults for a workspace.
@@ -186,19 +198,10 @@ impl ChromeSpec {
 pub struct InputSpec {
     /// Geometry step sizes for keyboard movement/resizing.
     pub steps: CommandStep,
-    /// Explicit key-to-command bindings.
-    pub bindings: Vec<CommandBinding>,
-}
-
-/// One authored keyboard binding.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "spec-schema", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct CommandBinding {
-    /// Keyboard chord.
-    pub chord: KeyChord,
-    /// Command emitted by that chord.
-    pub command: PanelCommand,
+    /// Keymap layers in precedence order; later layers shadow earlier ones.
+    /// Validated by compiling with the untyped (`String`) vocabulary, so
+    /// token, mode, and prefix errors surface at spec load.
+    pub keymaps: Vec<KeymapSpec>,
 }
 
 /// Authored persistence policy.
@@ -267,6 +270,8 @@ pub enum BackendKind {
     Tui,
     /// Browser-hosted terminal backend.
     BrowserTui,
+    /// Native Bevy UI backend.
+    Bevy,
 }
 
 /// Stable content kind names used by provider manifests.
@@ -298,6 +303,10 @@ pub enum ContentKind {
     Status,
     /// Spinner.
     Spinner,
+    /// Host-mounted component declared by `WorkspaceSpec::components`.
+    External,
+    /// Labeled input controls.
+    Form,
 }
 
 /// Provider-side declaration for one panel.
@@ -350,6 +359,8 @@ pub struct ResolvedWorkspace {
     pub persistence: PersistenceSpec,
     /// Authored panel content and metadata in declaration order.
     pub panels: Vec<PanelSpec>,
+    /// Declared external components in declaration order.
+    pub components: Vec<ExternalComponentSpec>,
 }
 
 /// One strict-spec diagnostic.
@@ -476,7 +487,13 @@ impl WorkspaceSpec {
             theme: self.theme,
             persistence: self.persistence,
             panels: self.panels,
+            components: self.components,
         })
+    }
+
+    /// The declared external component with this id, if any.
+    pub fn component(&self, id: &str) -> Option<&ExternalComponentSpec> {
+        self.components.iter().find(|component| component.id == id)
     }
 
     fn panel_windows(&self) -> Vec<PanelWin<SpecPanelId>> {
@@ -516,6 +533,14 @@ impl PanelSpec {
             binding: self.content.binding_id().map(str::to_owned),
         }
     }
+
+    /// The external component this panel's body names, if it has one.
+    pub fn external_component(&self) -> Option<&str> {
+        match &self.content {
+            ContentSpec::External { component, .. } => Some(component),
+            _ => None,
+        }
+    }
 }
 
 impl ContentSpec {
@@ -533,6 +558,8 @@ impl ContentSpec {
             Self::Meter { source } => source.binding_id(),
             Self::Status { source } => source.binding_id(),
             Self::Spinner { label } => label.binding_id(),
+            Self::External { source, .. } => source.binding_id(),
+            Self::Form { source } => source.binding_id(),
         }
     }
 }
@@ -569,7 +596,18 @@ impl ContentKind {
             ContentSpec::Meter { .. } => Self::Meter,
             ContentSpec::Status { .. } => Self::Status,
             ContentSpec::Spinner { .. } => Self::Spinner,
+            ContentSpec::External { .. } => Self::External,
+            ContentSpec::Form { .. } => Self::Form,
         }
+    }
+}
+
+impl ResolvedWorkspace {
+    /// The declaration a panel's external body names, if it has one.
+    pub fn panel_component(&self, panel: &PanelSpec) -> Option<&ExternalComponentSpec> {
+        panel
+            .external_component()
+            .and_then(|id| self.components.iter().find(|component| component.id == id))
     }
 }
 
@@ -613,6 +651,7 @@ fn validate_workspace(spec: &WorkspaceSpec, errors: &mut ErrorSink) {
     validate_surface(&spec.surface, errors);
     validate_input(&spec.input, errors);
     validate_panels(&spec.panels, errors);
+    validate_components(&spec.components, &spec.panels, errors);
 }
 
 fn validate_layout(layout: &LayoutSpec, errors: &mut ErrorSink) {
@@ -657,14 +696,26 @@ fn validate_surface(surface: &SurfaceSpec, errors: &mut ErrorSink) {
 }
 
 fn validate_input(input: &InputSpec, errors: &mut ErrorSink) {
-    let mut seen = HashSet::new();
-    for (index, binding) in input.bindings.iter().enumerate() {
-        if !seen.insert(binding.chord) {
-            errors.push(
-                format!("/input/bindings/{index}/chord"),
-                "duplicate key chord",
-            );
+    let mut ids = HashSet::new();
+    for (index, layer) in input.keymaps.iter().enumerate() {
+        if !ids.insert(layer.id.as_str()) {
+            errors.push(format!("/input/keymaps/{index}/id"), "duplicate keymap id");
         }
+    }
+    if let Err(error) = Keymap::<String>::compile(&input.keymaps) {
+        let layer = match &error {
+            KeymapError::Version { layer, .. }
+            | KeymapError::NoModes { layer }
+            | KeymapError::Token { layer, .. }
+            | KeymapError::UnknownMode { layer, .. }
+            | KeymapError::Intent { layer, .. } => Some(layer.as_str()),
+            KeymapError::Prefix { .. } => None,
+        };
+        let pointer = match layer.and_then(|id| input.keymaps.iter().position(|l| l.id == id)) {
+            Some(index) => format!("/input/keymaps/{index}"),
+            None => "/input/keymaps".to_owned(),
+        };
+        errors.push(pointer, error.to_string());
     }
 }
 
@@ -687,6 +738,7 @@ fn validate_panels(panels: &[PanelSpec], errors: &mut ErrorSink) {
             errors.push(format!("{base}/slug"), "duplicate panel slug");
         }
         validate_window(&panel.window, &format!("{base}/window"), errors);
+        validate_panel_content(&panel.content, &format!("{base}/content"), errors);
         if panel.window.state == WinState::Maximized && maximized.replace(index).is_some() {
             errors.push(
                 format!("{base}/window/state"),
@@ -721,6 +773,69 @@ fn validate_window(window: &WindowSpec, pointer: &str, errors: &mut ErrorSink) {
     }
     if !(1..=TILE_H_MAX).contains(&window.tile_h) {
         errors.push(format!("{pointer}/tile_h"), "tile_h must be in 1..=6");
+    }
+}
+
+fn validate_panel_content(content: &ContentSpec, pointer: &str, errors: &mut ErrorSink) {
+    let ContentSpec::External { layout, .. } = content else {
+        return;
+    };
+    for (name, value) in &layout.params {
+        if !value.is_finite() {
+            errors.push(
+                format!("{pointer}/layout/params/{name}"),
+                "layout parameter must be finite",
+            );
+        }
+    }
+}
+
+fn validate_components(
+    components: &[ExternalComponentSpec],
+    panels: &[PanelSpec],
+    errors: &mut ErrorSink,
+) {
+    let mut declared = HashSet::new();
+    for (index, component) in components.iter().enumerate() {
+        let base = format!("/components/{index}");
+        if component.id.is_empty() {
+            errors.push(format!("{base}/id"), "component id must not be empty");
+        }
+        if !declared.insert(component.id.as_str()) {
+            errors.push(format!("{base}/id"), "duplicate component id");
+        }
+        for (axis, extent) in component.min_size.iter().enumerate() {
+            if !extent.is_finite() || *extent <= 0.0 {
+                errors.push(
+                    format!("{base}/min_size/{axis}"),
+                    "min_size extent must be finite and positive",
+                );
+            }
+        }
+    }
+
+    let mut referenced = HashSet::new();
+    for (index, panel) in panels.iter().enumerate() {
+        let Some(id) = panel.external_component() else {
+            continue;
+        };
+        if declared.contains(id) {
+            referenced.insert(id);
+        } else {
+            errors.push(
+                format!("/panels/{index}/content/component"),
+                format!("undeclared component {id:?}"),
+            );
+        }
+    }
+
+    for (index, component) in components.iter().enumerate() {
+        if !referenced.contains(component.id.as_str()) {
+            errors.push(
+                format!("/components/{index}/id"),
+                format!("component {:?} is not referenced by any panel", component.id),
+            );
+        }
     }
 }
 
@@ -773,13 +888,64 @@ fn validate_providers(spec: &WorkspaceSpec, providers: &BindingManifest) -> Resu
 
 #[cfg(all(test, feature = "spec-json"))]
 mod tests {
+    #[test]
+    fn input_keymaps_validate_by_pointer() {
+        use crate::keymap::{KeymapSpec, RuleSpec, KEYMAP_SPEC_VERSION};
+        let rule = |keys: &str, intent: &str| RuleSpec {
+            keys: keys.into(),
+            intent: intent.into(),
+            modes: None,
+            enter: None,
+            label: None,
+            group: None,
+        };
+        let layer = |id: &str, rules: Vec<RuleSpec>| KeymapSpec {
+            spec_version: KEYMAP_SPEC_VERSION,
+            id: id.into(),
+            modes: vec!["normal".into()],
+            rules,
+        };
+        let diagnostics = |keymaps: Vec<KeymapSpec>| {
+            let mut errors = ErrorSink::new();
+            validate_input(
+                &InputSpec {
+                    steps: CommandStep::WEB,
+                    keymaps,
+                },
+                &mut errors,
+            );
+            errors
+                .finish()
+                .err()
+                .map(|e| {
+                    e.iter()
+                        .map(|d| (d.pointer().to_string(), d.message().to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+
+        assert!(diagnostics(vec![layer("a", vec![rule("g g", "first")])]).is_empty());
+
+        let bad_token = diagnostics(vec![layer("a", vec![]), layer("b", vec![rule("<nope>", "x")])]);
+        assert_eq!(bad_token[0].0, "/input/keymaps/1");
+        assert!(bad_token[0].1.contains("bad token `<nope>`"), "{}", bad_token[0].1);
+
+        let prefix = diagnostics(vec![layer("a", vec![rule("g", "x"), rule("g g", "y")])]);
+        assert_eq!(prefix[0].0, "/input/keymaps");
+        assert!(prefix[0].1.contains("`g` is a prefix of `g g`"), "{}", prefix[0].1);
+
+        let dup = diagnostics(vec![layer("a", vec![]), layer("a", vec![])]);
+        assert_eq!(dup[0], ("/input/keymaps/1/id".to_string(), "duplicate keymap id".to_string()));
+    }
+
     use super::*;
     use crate::theme::ThemeTokens;
     use crate::widgets::{DataSource, TextModel};
     use crate::{ChromeMetrics, Clamp, CommandStep, Key, TileMetrics};
     use serde_json::json;
 
-    fn valid_spec_json() -> serde_json::Value {
+    pub(super) fn valid_spec_json() -> serde_json::Value {
         json!({
             "spec_version": WORKSPACE_SPEC_VERSION,
             "id": "workspace-canary",
@@ -811,9 +977,11 @@ mod tests {
             },
             "input": {
                 "steps": CommandStep::CELLS,
-                "bindings": [{
-                    "chord": { "key": "left", "shift": false, "alt": false, "ctrl": false, "meta": true },
-                    "command": { "kind": "move", "dx": -16.0, "dy": 0.0 }
+                "keymaps": [{
+                    "spec_version": 1,
+                    "id": "canary-vi",
+                    "modes": ["normal"],
+                    "rules": [{ "keys": "g g", "intent": "nav.first", "modes": null, "enter": null, "label": null, "group": null }]
                 }]
             },
             "glyphs": "unicode",
@@ -888,6 +1056,12 @@ mod tests {
             "spinner" => {
                 json!({ "kind": "spinner", "label": { "source": "inline", "value": "Loading" } })
             }
+            "external" => json!({
+                "kind": "external",
+                "component": "graph",
+                "source": { "source": "binding", "id": "okf.graph" },
+                "layout": { "algorithm": "dagre", "group_by": "sort", "params": { "rank_sep": 2.0 } }
+            }),
             _ => panic!("unknown content kind fixture: {kind}"),
         }
     }
@@ -895,6 +1069,24 @@ mod tests {
     fn spec_with_content(content: serde_json::Value) -> serde_json::Value {
         let mut spec = valid_spec_json();
         spec["panels"][0]["content"] = content;
+        spec
+    }
+
+    fn valid_component_json() -> serde_json::Value {
+        json!({
+            "id": "graph",
+            "contract": "graph",
+            "requires": ["webgpu"],
+            "keep_mounted": true,
+            "min_size": [320.0, 240.0],
+            "events": ["select", "hover"],
+            "fallback": "cells"
+        })
+    }
+
+    fn spec_with_external_panel() -> serde_json::Value {
+        let mut spec = spec_with_content(valid_content_json("external"));
+        spec["components"] = json!([valid_component_json()]);
         spec
     }
 
@@ -921,6 +1113,7 @@ mod tests {
             "meter",
             "status",
             "spinner",
+            "external",
         ] {
             let mut content = valid_content_json(kind);
             content["unexpected"] = json!(true);
@@ -1020,11 +1213,7 @@ mod tests {
         let mut duplicate = doc["panels"][0].clone();
         duplicate["title"] = json!("Notes");
         doc["panels"].as_array_mut().unwrap().push(duplicate);
-        let duplicate_binding = doc["input"]["bindings"][0].clone();
-        doc["input"]["bindings"]
-            .as_array_mut()
-            .unwrap()
-            .push(duplicate_binding);
+        doc["input"]["keymaps"][0]["rules"][0]["count"] = json!(true);
 
         let errors = WorkspaceSpec::from_json_value(doc).expect_err("invalid spec reports errors");
         let diagnostics: Vec<_> = errors
@@ -1036,7 +1225,7 @@ mod tests {
         assert_eq!(diagnostics[1].0, "/surface/tablet_max");
         assert_eq!(diagnostics[2].0, "/chrome/new_field");
         assert!(diagnostics[2].1.contains("unknown field; allowed fields:"));
-        assert_eq!(diagnostics[3].0, "/input/bindings/1/chord");
+        assert_eq!(diagnostics[3].0, "/input/keymaps/0/rules/0/count");
         assert_eq!(diagnostics[4].0, "/panels/0/title");
         assert_eq!(diagnostics[5].0, "/panels/0/window/tile_w");
         assert_eq!(diagnostics[6].0, "/panels/1/id");
@@ -1062,10 +1251,10 @@ mod tests {
     #[test]
     fn color_codec_accepts_only_canonical_lowercase_rrggbb() {
         let mut spec = valid_spec_json();
-        spec["theme"]["colors"]["accent"] = json!("#5ef38c");
+        spec["theme"]["colors"]["highlight"] = json!("#5ef38c");
         assert!(WorkspaceSpec::from_json_value(spec.clone()).is_ok());
 
-        spec["theme"]["colors"]["accent"] = json!("#5EF38C");
+        spec["theme"]["colors"]["highlight"] = json!("#5EF38C");
         assert_eq!(
             WorkspaceSpec::from_json_value(spec.clone())
                 .unwrap_err()
@@ -1073,10 +1262,10 @@ mod tests {
                 .next()
                 .unwrap()
                 .pointer(),
-            "/theme/colors/accent"
+            "/theme/colors/highlight"
         );
 
-        spec["theme"]["colors"]["accent"] = json!("fff");
+        spec["theme"]["colors"]["highlight"] = json!("fff");
         assert_eq!(
             WorkspaceSpec::from_json_value(spec)
                 .unwrap_err()
@@ -1084,7 +1273,7 @@ mod tests {
                 .next()
                 .unwrap()
                 .pointer(),
-            "/theme/colors/accent"
+            "/theme/colors/highlight"
         );
     }
 
@@ -1124,6 +1313,185 @@ mod tests {
             errors.iter().next().unwrap().pointer(),
             "/panels/0/content/kind"
         );
+    }
+
+    /// Resolve a spec document against providers declared from its own panels.
+    pub(super) fn resolved_from(doc: serde_json::Value) -> ResolvedWorkspace {
+        let spec = WorkspaceSpec::from_json_value(doc).expect("valid spec decodes");
+        let providers = BindingManifest {
+            backend: BackendKind::Web,
+            panels: spec.panels.iter().map(PanelSpec::provider_declaration).collect(),
+        };
+        spec.resolve(&providers).expect("providers match spec")
+    }
+
+    #[test]
+    fn external_panel_with_declared_component_round_trips_losslessly() {
+        let spec = WorkspaceSpec::from_json_value(spec_with_external_panel())
+            .expect("external panel with a declared component decodes");
+        let encoded = serde_json::to_value(&spec).expect("spec encodes");
+        let decoded = WorkspaceSpec::from_json_value(encoded).expect("encoded spec decodes");
+
+        assert_eq!(decoded, spec);
+        assert_eq!(spec.components.len(), 1);
+        assert_eq!(spec.component("graph"), spec.components.first());
+        assert_eq!(spec.panels[0].external_component(), Some("graph"));
+        assert_eq!(spec.panels[0].content.binding_id(), Some("okf.graph"));
+    }
+
+    #[test]
+    fn resolved_workspace_exposes_the_declaration_an_external_panel_names() {
+        let spec = WorkspaceSpec::from_json_value(spec_with_external_panel())
+            .expect("external panel decodes");
+        let providers = BindingManifest {
+            backend: BackendKind::Web,
+            panels: vec![spec.panels[0].provider_declaration()],
+        };
+
+        let resolved = spec.resolve(&providers).expect("providers match spec");
+
+        assert_eq!(resolved.components.len(), 1);
+        assert_eq!(
+            resolved.panel_component(&resolved.panels[0]).map(|c| c.id.as_str()),
+            Some("graph")
+        );
+        assert!(component_satisfied(
+            &resolved.components[0],
+            &[Capability::WebGpu]
+        ));
+    }
+
+    #[test]
+    fn external_component_diagnostics_report_their_pointer() {
+        let mut undeclared = spec_with_content(valid_content_json("external"));
+        undeclared["components"] = json!([valid_component_json()]);
+        undeclared["panels"][0]["content"]["component"] = json!("missing");
+        assert_eq!(
+            decode_error_pointers(undeclared),
+            ["/panels/0/content/component", "/components/0/id"],
+            "an unknown reference leaves its declaration unreferenced"
+        );
+
+        let mut duplicate = spec_with_external_panel();
+        duplicate["components"]
+            .as_array_mut()
+            .expect("components is an array")
+            .push(valid_component_json());
+        assert!(decode_error_pointers(duplicate).contains(&"/components/1/id".into()));
+
+        let mut unreferenced = valid_spec_json();
+        unreferenced["components"] = json!([valid_component_json()]);
+        assert_eq!(decode_error_pointers(unreferenced), ["/components/0/id"]);
+
+        let mut negative = spec_with_external_panel();
+        negative["components"][0]["min_size"] = json!([0.0, 240.0]);
+        assert_eq!(
+            decode_error_pointers(negative),
+            ["/components/0/min_size/0"]
+        );
+    }
+
+    #[test]
+    fn closed_external_enum_sets_report_unsupported_names_by_pointer() {
+        for (field, value, pointer) in [
+            ("contract", json!("canvas"), "/components/0/contract"),
+            ("fallback", json!("iframe"), "/components/0/fallback"),
+        ] {
+            let mut doc = spec_with_external_panel();
+            doc["components"][0][field] = value;
+            assert_eq!(decode_error_pointers(doc), [pointer], "{field}");
+        }
+
+        let mut requires = spec_with_external_panel();
+        requires["components"][0]["requires"] = json!(["webgl"]);
+        assert_eq!(decode_error_pointers(requires), ["/components/0/requires/0"]);
+
+        let mut events = spec_with_external_panel();
+        events["components"][0]["events"] = json!(["drag"]);
+        assert_eq!(decode_error_pointers(events), ["/components/0/events/0"]);
+
+        let mut algorithm = spec_with_external_panel();
+        algorithm["panels"][0]["content"]["layout"]["algorithm"] = json!("spring");
+        assert_eq!(
+            decode_error_pointers(algorithm),
+            ["/panels/0/content/layout/algorithm"]
+        );
+    }
+
+    #[test]
+    fn every_layout_algorithm_decodes_under_its_serde_name() {
+        use crate::widgets::graph::LayoutAlgorithm as A;
+
+        let all = [
+            A::Force,
+            A::Amphiphile,
+            A::Circle,
+            A::Grid,
+            A::Concentric,
+            A::Spectral,
+            A::Dagre,
+            A::Fcose,
+            A::Sphere,
+        ];
+        for algorithm in all {
+            // Exhaustive, so a new solver fails to compile until it joins `all`.
+            match algorithm {
+                A::Force
+                | A::Amphiphile
+                | A::Circle
+                | A::Grid
+                | A::Concentric
+                | A::Spectral
+                | A::Dagre
+                | A::Fcose
+                | A::Sphere => {}
+            }
+            let mut doc = spec_with_external_panel();
+            doc["panels"][0]["content"]["layout"]["algorithm"] =
+                serde_json::to_value(algorithm).expect("algorithm serializes");
+            if let Err(errors) = WorkspaceSpec::from_json_value(doc) {
+                panic!("{algorithm:?} is rejected: {errors:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn non_finite_layout_parameter_is_rejected_by_pointer() {
+        let mut doc = spec_with_external_panel();
+        doc["panels"][0]["content"]["layout"]["params"] = json!({ "rank_sep": "NaN" });
+
+        assert_eq!(
+            decode_error_pointers(doc),
+            ["/panels/0/content/layout/params/rank_sep"]
+        );
+    }
+
+    #[test]
+    fn inline_external_graph_body_decodes_with_its_model() {
+        let mut doc = spec_with_external_panel();
+        doc["panels"][0]["content"]["source"] = json!({
+            "source": "inline",
+            "value": {
+                "nodes": [{
+                    "id": "acme/gross-margin",
+                    "label": "Gross margin",
+                    "sort": "metric",
+                    "color": [94, 243, 140],
+                    "size": 3.0,
+                    "mass": 1.0,
+                    "repulsion": 40.0
+                }],
+                "edges": [{
+                    "source": 0, "target": 0, "kind": "references",
+                    "weight": 1.0, "rest_length": 120.0
+                }]
+            }
+        });
+
+        let spec = WorkspaceSpec::from_json_value(doc.clone()).expect("inline graph decodes");
+
+        assert_eq!(spec.panels[0].content.binding_id(), None);
+        assert_eq!(doc["components"][0]["contract"], json!("graph"));
     }
 
     #[test]

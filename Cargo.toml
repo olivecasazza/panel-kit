@@ -1,12 +1,16 @@
 [workspace]
-members = ["crates/panel-kit-core", "crates/panel-kit-grammar", "crates/panel-kit-tui", "tools/spec-parity"]
+members = ["crates/panel-kit-core", "crates/panel-kit-graph-layout", "crates/panel-kit-grammar", "crates/panel-kit-tui", "crates/panel-kit-bevy", "tools/spec-parity", "tools/visual-parity"]
+# crates/beamterm-renderer: patched crates.io copy, wired in by [patch].
+# vendor: third-party crates (vendor/*/VENDORED.md) build as path
+# dependencies, outside this workspace's members and lint gates.
+exclude = ["crates/beamterm-renderer", "vendor"]
 
 [package]
 name = "panel-kit"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 license = "MIT"
-description = "Generic Dioxus panel-workspace library: floating/tiling panels, traffic lights, drag/resize, tiling drag-reorder, minimize-to-dock, layout persistence"
+description = "Generic Dioxus panel-workspace library: floating/tiling panels, traffic lights, drag/resize, tiling drag-to-swap, minimize-to-dock, layout persistence"
 repository = "https://github.com/ocasazza/panel-kit"
 readme = "README.md"
 keywords = ["dioxus", "ui", "panels", "workspace", "wasm"]
@@ -22,7 +26,7 @@ default-target = "wasm32-unknown-unknown"
 # build.rs generates the pre-WASM boot stylesheet from the canonical token
 # source, so the palette cannot be hand-copied out of sync again.
 [build-dependencies]
-panel-kit-core = { version = "1.1.1", path = "crates/panel-kit-core" }
+panel-kit-core = { version = "1.2.0", path = "crates/panel-kit-core" }
 
 
 [features]
@@ -31,6 +35,7 @@ web-runtime = [
     "dep:dioxus",
     "dep:gloo-storage",
     "dep:js-sys",
+    "dep:panel-kit-grammar",
     "dep:serde",
     "dep:serde_json",
     "dep:wasm-bindgen",
@@ -39,10 +44,13 @@ web-runtime = [
     "panel-kit-core/spec-json",
 ]
 bevy = ["web-runtime"]
-spec-plan = ["dep:serde", "dep:serde_json", "panel-kit-core/spec-json"]
+spec-plan = ["dep:serde", "dep:serde_json", "panel-kit-core/spec-json", "panel-kit-tui/spec-plan"]
 
 [dependencies]
-panel-kit-core = { version = "1.1.1", path = "crates/panel-kit-core" }
+panel-kit-core = { version = "1.2.0", path = "crates/panel-kit-core" }
+# Host glue for topos/grammar regimes (section_view, autoloop_host) paints
+# sections and edits from panel-kit-grammar's compiled site layer.
+panel-kit-grammar = { version = "1.2.0", path = "crates/panel-kit-grammar", optional = true }
 dioxus = { version = "0.6", features = ["web"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
@@ -55,6 +63,9 @@ js-sys = { version = "0.3", optional = true }
 web-sys = { version = "0.3", features = ["Blob", "BlobPropertyBag", "Clipboard", "DomRect", "Document", "Element", "Event", "EventTarget", "FocusEvent", "FocusOptions", "HtmlAnchorElement", "HtmlElement", "MediaQueryList", "Navigator", "Node", "NodeList", "PointerEvent", "ResizeObserver", "ResizeObserverEntry", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Selection", "Storage", "Url", "Window", "console"], optional = true }
 
 [dev-dependencies]
+# Monarch grammars are data; these tests tokenize samples through them. The
+# grammars use look-ahead, which JS RegExp supports and `regex` does not.
+fancy-regex = "0.14"
 # Headless markup rendering for the loading components' contract tests
 # (src/loading.rs): assertions run against real rendered HTML, not rsx
 # source text.
@@ -64,11 +75,69 @@ rstest = "0.25"
 parking_lot = "0.12"
 # Fake-async delays in the loading example's hydration arc demo.
 gloo-timers = { version = "0.3", features = ["futures"] }
-panel-kit-tui = { version = "1.1.1", path = "crates/panel-kit-tui" }
-# Topos/grammar demo façade (examples/support/topos_demo.rs) and its test.
-panel-kit-grammar = { version = "1.1.1", path = "crates/panel-kit-grammar" }
+panel-kit-tui = { version = "1.2.0", path = "crates/panel-kit-tui" }
+# The grammar/topos host façades (examples/support/{topos_demo,trio_host}.rs)
+# and their tests, plus the panel-kit-tui trio host.
+panel-kit-grammar = { version = "1.2.0", path = "crates/panel-kit-grammar" }
 # Fetch for the auto-loop host example (examples/autoloop.rs).
 web-sys = { version = "0.3", features = ["Headers", "Request", "RequestInit", "Response"] }
+# jump-cannon's graph view (renderer + canvas) for the graph hosts' graph
+# panel, vendored: vendor/jump-cannon/VENDORED.md.
+jump-cannon-graph-view = { path = "vendor/jump-cannon/graph-view" }
+# Static + GPU layout solvers behind the `graph` component contract
+# (crates/panel-kit-graph-layout): vendor/jump-cannon/VENDORED.md.
+graph-layouts = { path = "vendor/jump-cannon/graph-layouts" }
+panel-kit-graph-layout = { version = "0.1.0", path = "crates/panel-kit-graph-layout" }
+# The ratatui parts the TUI examples draw. Crossterm and the WGPU shim are
+# target-scoped: the native loops drive a real terminal, the browser loops a
+# WebGL2 canvas.
+ratatui = { version = "0.30.1", default-features = false, features = ["all-widgets", "layout-cache"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+crossterm = "0.29"
+ratatui = { version = "0.30.1", features = ["crossterm"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# graph-layouts solves through wgpu, whose API types are neither `Send` nor
+# `Sync` on wasm without atomics unless this feature is on. `panel-kit` picks
+# it up transitively through jump-cannon-graph-view; an example that solves a
+# graph on its own declares the feature itself.
+wgpu = { version = "23", default-features = false, features = ["fragile-send-sync-non-atomic-wasm"] }
+
+# ratzilla drives the browser-hosted ratatui loop; its panic hook reports a
+# trapped panic into the page rather than into a bare wasm trap.
+ratzilla = "0.3.1"
+console_error_panic_hook = "0.1"
+critical-section = { version = "1.2", features = ["std"] }
+
+# The TUI demos are examples of this crate; each one drives a single surface.
+[[example]]
+name = "standalone_panel"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "trio_tui"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "trio_browser_tui"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "topos_tui"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "topos_browser_tui"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "workspace_tui"
+required-features = ["spec-plan"]
+
+[[example]]
+name = "workspace_browser_tui"
+required-features = ["spec-plan"]
 
 # Injected by dioxus-cli on first `dx build` — dx builds the example demos
 # under these profiles.

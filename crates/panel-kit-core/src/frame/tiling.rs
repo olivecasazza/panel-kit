@@ -1,7 +1,7 @@
 use crate::reducer::Snapshot;
 use crate::{
-    clamp_scroll, effective_rect, floating_content_height, Mode, PanelKey, Region, WinState,
-    TILE_H_MAX, TILE_W_MAX,
+    clamp_scroll, effective_rect, floating_content_height, Mode, PanelKey, PanelWin, Region,
+    WinState, TILE_H_MAX, TILE_W_MAX,
 };
 
 use super::scratch::{ProjectionBuffer, TilePlacement};
@@ -25,11 +25,27 @@ pub(super) fn project_tiles<K: PanelKey>(
     metrics: &TileLayoutMetrics,
     scratch: &mut ProjectionBuffer<K>,
 ) -> TileGridProjection {
-    let columns = metrics.columns.clamp(1, TILE_W_MAX);
+    pack_tiles(&snapshot.panels, workspace, metrics, &mut scratch.tile_rows)
+}
+
+/// Pack `panels`, in slice order, into tile placements appended to `rows`.
+/// Placement `source_index` values index `panels`.
+pub(super) fn pack_tiles<K: PanelKey>(
+    panels: &[PanelWin<K>],
+    workspace: Region,
+    metrics: &TileLayoutMetrics,
+    rows_out: &mut Vec<TilePlacement>,
+) -> TileGridProjection {
+    let cap = metrics.columns.clamp(1, TILE_W_MAX);
+    let start = rows_out.len();
     let rows = match metrics.fill_order {
-        TileFillOrder::RowMajor => project_row_major(snapshot, columns, scratch),
-        TileFillOrder::ColumnMajor => project_column_major(snapshot, columns, scratch),
+        TileFillOrder::RowMajor => project_row_major(panels, cap, rows_out),
+        TileFillOrder::ColumnMajor => project_column_major(panels, cap, rows_out),
     };
+    // Declare only the columns a tile reaches: the packers stretch a shelf or a
+    // column to fill its own span, so the tracks the spans do not reach would
+    // otherwise sit empty at the right edge while every tile is narrower for it.
+    let columns = reached_columns(&rows_out[start..]).min(cap).max(1);
     let usable_w =
         (workspace.w - metrics.padding * 2.0 - metrics.gap * columns.saturating_sub(1) as f64)
             .max(0.0);
@@ -40,8 +56,7 @@ pub(super) fn project_tiles<K: PanelKey>(
         .max(metrics.resize.col_floor)
         .max(0.0);
     let natural_h = metrics.row_min.max(0.0);
-    let row_heights =
-        project_row_heights(scratch, rows, natural_h, usable_h, metrics.fill_viewport);
+    let row_heights = project_row_heights(rows, natural_h, usable_h, metrics.fill_viewport);
 
     TileGridProjection {
         columns,
@@ -53,6 +68,16 @@ pub(super) fn project_tiles<K: PanelKey>(
     }
 }
 
+/// Columns the placements reach: the furthest tile edge, at least one.
+fn reached_columns(placements: &[TilePlacement]) -> u8 {
+    placements
+        .iter()
+        .map(|placement| placement.column as u16 + placement.column_span as u16)
+        .max()
+        .unwrap_or(1)
+        .min(u8::MAX as u16) as u8
+}
+
 /// Size each row from the panels actually in it.
 ///
 /// `natural` is the floor every row respects. When `fill_viewport` is set, the
@@ -61,13 +86,7 @@ pub(super) fn project_tiles<K: PanelKey>(
 /// preserves relative row heights, which is the whole point: under the old
 /// single `track_h`, growing one panel's `row_span` raised `rows`, shrank
 /// `usable_h / rows`, and so shrank every other row with it.
-fn project_row_heights<K: PanelKey>(
-    _scratch: &ProjectionBuffer<K>,
-    rows: u16,
-    natural: f64,
-    usable_h: f64,
-    fill_viewport: bool,
-) -> RowHeights {
+fn project_row_heights(rows: u16, natural: f64, usable_h: f64, fill_viewport: bool) -> RowHeights {
     let count = (rows as usize).clamp(1, MAX_TILE_ROWS);
 
     // Every row is exactly `natural`. A panel with row_span = N is rendered as
@@ -95,16 +114,16 @@ fn project_row_heights<K: PanelKey>(
     RowHeights(heights)
 }
 fn project_row_major<K: PanelKey>(
-    snapshot: &Snapshot<K>,
+    panels: &[PanelWin<K>],
     columns: u8,
-    scratch: &mut ProjectionBuffer<K>,
+    tile_rows: &mut Vec<TilePlacement>,
 ) -> u16 {
     let mut used = 0_u8;
     let mut row = 0_u16;
     let mut shelf_h = 0_u8;
-    let mut shelf_start = scratch.tile_rows.len();
+    let mut shelf_start = tile_rows.len();
 
-    for (source_index, panel) in snapshot.panels.iter().enumerate() {
+    for (source_index, panel) in panels.iter().enumerate() {
         if panel.state != WinState::Floating {
             continue;
         }
@@ -112,15 +131,15 @@ fn project_row_major<K: PanelKey>(
         let column_span = panel.tile_w.clamp(1, columns);
         let row_span = panel.tile_h.clamp(1, TILE_H_MAX);
         if used + column_span > columns {
-            stretch_shelf(&mut scratch.tile_rows[shelf_start..], shelf_h);
-            fill_shelf(&mut scratch.tile_rows[shelf_start..], columns, used);
+            stretch_shelf(&mut tile_rows[shelf_start..], shelf_h);
+            fill_shelf(&mut tile_rows[shelf_start..], columns, used);
             row = row.saturating_add(shelf_h.max(1) as u16);
             used = 0;
             shelf_h = 0;
-            shelf_start = scratch.tile_rows.len();
+            shelf_start = tile_rows.len();
         }
 
-        scratch.tile_rows.push(TilePlacement {
+        tile_rows.push(TilePlacement {
             source_index,
             column: used,
             row,
@@ -130,8 +149,8 @@ fn project_row_major<K: PanelKey>(
         used += column_span;
         shelf_h = shelf_h.max(row_span);
     }
-    stretch_shelf(&mut scratch.tile_rows[shelf_start..], shelf_h);
-    fill_shelf(&mut scratch.tile_rows[shelf_start..], columns, used);
+    stretch_shelf(&mut tile_rows[shelf_start..], shelf_h);
+    fill_shelf(&mut tile_rows[shelf_start..], columns, used);
 
     row.saturating_add(shelf_h as u16).max(1)
 }
@@ -154,12 +173,12 @@ fn fill_shelf(shelf: &mut [TilePlacement], columns: u8, used: u8) {
 }
 
 fn project_column_major<K: PanelKey>(
-    snapshot: &Snapshot<K>,
+    panels: &[PanelWin<K>],
     columns: u8,
-    scratch: &mut ProjectionBuffer<K>,
+    tile_rows: &mut Vec<TilePlacement>,
 ) -> u16 {
-    let mut rows = column_major_rows_lower_bound(snapshot, columns);
-    while column_major_columns(snapshot, rows, columns) > columns as u16 && rows < u16::MAX {
+    let mut rows = column_major_rows_lower_bound(panels, columns);
+    while column_major_columns(panels, rows, columns) > columns as u16 && rows < u16::MAX {
         rows += 1;
     }
 
@@ -167,7 +186,8 @@ fn project_column_major<K: PanelKey>(
     let mut used = 0_u16;
     let mut column_w = 0_u8;
     let mut column_last = None;
-    for (source_index, panel) in snapshot.panels.iter().enumerate() {
+    let mut column_start = tile_rows.len();
+    for (source_index, panel) in panels.iter().enumerate() {
         if panel.state != WinState::Floating {
             continue;
         }
@@ -175,25 +195,48 @@ fn project_column_major<K: PanelKey>(
         let column_span = panel.tile_w.clamp(1, columns);
         let row_span = panel.tile_h.clamp(1, TILE_H_MAX);
         if used > 0 && used.saturating_add(row_span as u16) > rows {
-            fill_column(&mut scratch.tile_rows, column_last, used, rows);
+            close_column(tile_rows, column_start, column_last, used, rows, column_w);
             column = column.saturating_add(column_w.max(1) as u16);
             used = 0;
             column_w = 0;
+            column_start = tile_rows.len();
         }
 
-        scratch.tile_rows.push(TilePlacement {
+        tile_rows.push(TilePlacement {
             source_index,
             column: column.min(u8::MAX as u16) as u8,
             row: used,
             column_span,
             row_span,
         });
-        column_last = Some(scratch.tile_rows.len() - 1);
+        column_last = Some(tile_rows.len() - 1);
         used = used.saturating_add(row_span as u16);
         column_w = column_w.max(column_span);
     }
-    fill_column(&mut scratch.tile_rows, column_last, used, rows);
+    close_column(tile_rows, column_start, column_last, used, rows, column_w);
     rows
+}
+
+/// Finish one column: its bottom panel takes the rows the column left empty
+/// and every member takes the column's width, so a narrow tile in a wide
+/// column never leaves a gap beside it.
+fn close_column(
+    tile_rows: &mut [TilePlacement],
+    start: usize,
+    last: Option<usize>,
+    used: u16,
+    rows: u16,
+    width: u8,
+) {
+    fill_column(tile_rows, last, used, rows);
+    stretch_column(&mut tile_rows[start..], width);
+}
+
+/// Widen every placement in one column to the column's width.
+fn stretch_column(placements: &mut [TilePlacement], width: u8) {
+    for placement in placements {
+        placement.column_span = placement.column_span.max(width);
+    }
 }
 
 /// Stretch a column's bottom panel over the rows the column left empty, so
@@ -208,11 +251,11 @@ fn fill_column(placements: &mut [TilePlacement], last: Option<usize>, used: u16,
 /// Smallest row count a column-major fill could need: every panel must fit
 /// inside one column, and the total cell area must fit the grid. The fit
 /// loop in [`project_column_major`] raises it until the packing closes.
-fn column_major_rows_lower_bound<K: PanelKey>(snapshot: &Snapshot<K>, columns: u8) -> u16 {
+fn column_major_rows_lower_bound<K: PanelKey>(panels: &[PanelWin<K>], columns: u8) -> u16 {
     let mut tallest = 0_u16;
     let mut area = 0_u32;
 
-    for panel in &snapshot.panels {
+    for panel in panels {
         if panel.state != WinState::Floating {
             continue;
         }
@@ -226,12 +269,12 @@ fn column_major_rows_lower_bound<K: PanelKey>(snapshot: &Snapshot<K>, columns: u
     tallest.max(by_area).max(1)
 }
 
-fn column_major_columns<K: PanelKey>(snapshot: &Snapshot<K>, rows: u16, columns: u8) -> u16 {
+fn column_major_columns<K: PanelKey>(panels: &[PanelWin<K>], rows: u16, columns: u8) -> u16 {
     let mut column = 0_u16;
     let mut used = 0_u16;
     let mut column_w = 0_u8;
 
-    for panel in &snapshot.panels {
+    for panel in panels {
         if panel.state != WinState::Floating {
             continue;
         }
@@ -368,6 +411,7 @@ fn projected_content_height<K: PanelKey>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use crate::reducer::Viewport;
     use crate::{
         LayoutBuilder, PanelKind, SurfaceCapabilities, SurfaceProfile, TileMetrics, Units,
@@ -904,13 +948,16 @@ mod tests {
                 ],
             },
             LayoutCase {
+                // A single span-2 panel in a 4-column grid fills the band, as
+                // row-major has always done: the two columns no tile reaches
+                // are not declared, so they cannot sit empty.
                 name: "column-major/single panel fills its columns",
                 panels: &[(2, 2)],
                 minimized: &[],
                 fill_order: COLUMN_MAJOR,
                 fill_viewport: true,
                 expected_rows: 2,
-                expected_regions: &[(0.0, 0.0, 600.0, 900.0)],
+                expected_regions: &[(0.0, 0.0, 1200.0, 900.0)],
             },
             LayoutCase {
                 name: "spans/clamp to the grid maxima",
@@ -1115,4 +1162,73 @@ mod tests {
             "the resized panel itself must actually change"
         );
     }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// Every declared cell has a tile on it: the packers stretch a shelf or
+        /// a column to its full span and the grid declares only reached columns,
+        /// whatever the author's spans ask for.
+        #[test]
+        fn every_declared_cell_holds_a_tile(
+            spans in prop::collection::vec((1_u8..=3, 1_u8..=3), 1..=4),
+            width in 240.0_f64..2400.0,
+            column_major in any::<bool>(),
+        ) {
+            let mut layout = LayoutBuilder::new();
+            let kinds = [TestPanel::One, TestPanel::Two, TestPanel::Three, TestPanel::Four];
+            let panels = spans
+                .iter()
+                .enumerate()
+                .map(|(index, &(w, h))| {
+                    layout
+                        .at(kinds[index], 0.0, 0.0, 20.0, 10.0)
+                        .with_tile(w, h)
+                })
+                .collect::<Vec<_>>();
+            let snapshot = Snapshot::from_defaults(
+                panels,
+                Mode::Tiling,
+                Viewport { width, height: 900.0, units: Units::CssPx },
+            );
+            // The surface class picks the column count, so a width sweep is a
+            // sweep of compact, tablet and regular layouts.
+            let surface = SurfaceProfile::from_logical_width(
+                width,
+                crate::WEB_COMPACT_MAX,
+                crate::WEB_TABLET_MAX,
+                SurfaceCapabilities { coarse_pointer: false, hover: true, keyboard: true },
+            );
+            let mut metrics = TileLayoutMetrics::from_tile_metrics(TileMetrics::WEB, surface);
+            metrics.gap = 0.0;
+            metrics.padding = 0.0;
+            metrics.fill_order = if column_major {
+                TileFillOrder::ColumnMajor
+            } else {
+                TileFillOrder::RowMajor
+            };
+            let mut scratch = ProjectionBuffer::with_panel_capacity(snapshot.panels.len());
+            let declared = metrics.columns;
+            let workspace = Region::new(0.0, 0.0, width, 900.0);
+            let grid = project_tiles(&snapshot, workspace, &metrics, &mut scratch);
+
+            prop_assert!(grid.columns >= 1 && grid.columns <= declared.max(1));
+            let mut covered = vec![false; grid.rows as usize * grid.columns as usize];
+            for placement in &scratch.tile_rows {
+                prop_assert!(placement.column as u16 + placement.column_span as u16 <= grid.columns as u16);
+                prop_assert!(placement.row + placement.row_span as u16 <= grid.rows);
+                for row in placement.row..placement.row + placement.row_span as u16 {
+                    for column in placement.column..placement.column + placement.column_span {
+                        covered[row as usize * grid.columns as usize + column as usize] = true;
+                    }
+                }
+            }
+            prop_assert!(
+                covered.iter().all(|cell| *cell),
+                "uncovered cell with spans {:?}, width {}, column-major {}: {} rows x {} columns",
+                spans, width, column_major, grid.rows, grid.columns
+            );
+        }
+    }
+
 }

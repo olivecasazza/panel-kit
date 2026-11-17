@@ -45,9 +45,11 @@
 
 pub mod badge;
 pub mod charts;
+pub mod forms;
 pub mod input;
 pub mod meter;
 pub mod scroll;
+pub mod graph;
 #[cfg(feature = "spec-plan")]
 pub mod spec_plan;
 pub mod spinner;
